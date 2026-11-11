@@ -8,6 +8,7 @@ Prerequisite:  docker compose up -d postgres valkey
 """
 
 import os
+import tempfile
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
@@ -17,6 +18,8 @@ os.environ["APP_ENV"] = "test"
 os.environ["POSTGRES_DB"] = os.environ.get("TEST_POSTGRES_DB", "csp_test")
 os.environ["REDIS_URL"] = os.environ.get("TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
 os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 40)
+# Uploaded files go to a throwaway folder, never the developer's real storage.
+os.environ["STORAGE_DIR"] = tempfile.mkdtemp(prefix="csp-test-storage-")
 
 import httpx
 import pytest

@@ -5,7 +5,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
-from app.api.deps import CurrentPrincipal, DbSession, Principal, require
+from app.api.deps import CurrentPrincipal, DbSession, require
+from app.core.principal import Principal
 from app.core.rbac import Permission
 from app.models.organization import Organization
 from app.models.user import User

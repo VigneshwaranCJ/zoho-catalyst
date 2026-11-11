@@ -91,27 +91,36 @@ Types are abbreviated: `uuid`, `text`, `int`, `bool`, `jsonb`, `ts` = `timestamp
 |---|---|---|
 | id | uuid PK | |
 | organization_id | uuid FK | |
-| source_type | text | `pdf` / `docx` / `html` / `url` / `markdown` |
-| original_name | text | `SmartAir_X1_Manual.pdf` |
-| uri | text NULL | URL, for web sources |
-| storage_path | text | where the original bytes are kept |
-| sha256 | text | detects re-uploads of the same file |
+| source_type | text | `pdf` / `docx` / `html` / `markdown` / `text` / `url` |
+| original_name | text | `SmartAir_X1_Manual.pdf` (sanitized display name) |
+| uri / final_uri | text NULL | submitted URL / URL after redirects (web sources) |
+| storage_key | text NULL | where the original bytes are kept (NULL until a URL is fetched) |
+| sha256 | text NULL | detects re-uploads of the same file (NULL until a URL is fetched) |
 | mime_type | text | detected from bytes, not trusted from the browser |
 | size_bytes | bigint | |
-| page_count | int NULL | |
+| page_count | int NULL | PDFs only; DOCX/HTML have no fixed pages |
 | uploaded_by | uuid FK → users | |
-| UNIQUE (organization_id, sha256) | | |
+| deleted_at | ts NULL | soft delete |
+| UNIQUE (organization_id, sha256) WHERE sha256 IS NOT NULL AND deleted_at IS NULL | | duplicates are per organization; deleting allows re-upload |
 
-**ingestion_jobs** — progress of turning a source into OKF
+**ingestion_jobs** — background work that turns a source into extracted, page-marked text (Phase 3) and later into OKF (Phase 4)
 | column | type | notes |
 |---|---|---|
 | id | uuid PK | |
 | organization_id | uuid FK | |
-| source_id | uuid FK → knowledge_sources | |
-| status | text | `queued` / `extracting` / `generating` / `validating` / `needs_review` / `failed` / `done` |
+| source_id | uuid FK → knowledge_sources | a retry creates a new job; the newest job is the source's status |
+| status | text | Phase 3: `queued` → `fetching` (URLs) → `extracting` → `extracted` \| `failed`. Phase 4 adds `generating` / `validating` / `needs_review` |
 | progress | int | 0–100 |
-| error | text NULL | |
-| extraction_artifact_path | text | Docling JSON (keeps page numbers and bounding boxes) |
+| attempts | int | incremented at each claim; max 3 by default |
+| error | text NULL | user-safe message (internal details stay in the logs) |
+| run_after | ts | retry backoff: 30 s, 60 s, 120 s … |
+| locked_at / locked_by | ts / text | which worker holds the job; stale locks (crashed worker) are reclaimed after 15 min |
+| started_at / finished_at | ts | |
+| extracted_key | text | page-marked Markdown in storage |
+| docling_key | text | full Docling JSON (gz): page numbers and bounding boxes |
+| stats | jsonb | pages, tables, headings outline, extractor version, duration |
+
+Workers claim jobs through `ingestion_claim_next_job(worker, stale_after)`, an owner-run `SECURITY DEFINER` function using `FOR UPDATE SKIP LOCKED`. It's the only way the worker sees jobs across organizations, and it returns just the job and organization id; all processing then runs in a normal tenant-scoped (RLS) session.
 
 **knowledge_documents** — one row per OKF file (e.g. `policies/warranty-policy.md`)
 | column | type | notes |

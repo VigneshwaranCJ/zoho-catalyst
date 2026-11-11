@@ -87,6 +87,8 @@ def test_token_signed_with_other_secret_is_rejected() -> None:
 def test_rbac_matrix_matches_security_design() -> None:
     assert ROLE_PERMISSIONS["org_admin"] == frozenset(Permission)
     assert has_permission("editor", Permission.PUBLISH_KNOWLEDGE)
+    assert has_permission("viewer", Permission.VIEW_KNOWLEDGE)
+    assert not has_permission("viewer", Permission.EDIT_KNOWLEDGE)
     assert not has_permission("editor", Permission.MANAGE_ORG)
     assert has_permission("agent", Permission.APPROVE_AGENT_ACTIONS)
     assert not has_permission("agent", Permission.EDIT_KNOWLEDGE)

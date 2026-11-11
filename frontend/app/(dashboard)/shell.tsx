@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import {
   BarChart3,
   BookOpen,
@@ -25,15 +25,55 @@ import { SessionProvider, useSession } from "./session";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, phase: null },
-  { href: "/knowledge", label: "Knowledge", icon: BookOpen, phase: 3 },
+  { href: "/knowledge", label: "Knowledge", icon: BookOpen, phase: null },
   { href: "/conversations", label: "Conversations", icon: MessagesSquare, phase: 7 },
   { href: "/tickets", label: "Tickets", icon: Ticket, phase: 7 },
   { href: "/analytics", label: "Analytics", icon: BarChart3, phase: 8 },
   { href: "/settings", label: "Settings", icon: Settings, phase: 8 },
 ] as const;
 
+/** Navigation links; `pathname` highlights the current section (null = none yet). */
+function NavList({ pathname }: { pathname: string | null }) {
+  return (
+    <nav className="flex-1 space-y-1 p-2" aria-label="Main">
+      {NAV.map(({ href, label, icon: Icon, phase }) => {
+        const active = pathname !== null && (pathname === href || pathname.startsWith(`${href}/`));
+        const disabled = phase !== null;
+        const classes = cn(
+          "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
+          active && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+          disabled ? "cursor-not-allowed text-muted-foreground" : "hover:bg-sidebar-accent",
+        );
+        const content = (
+          <>
+            <Icon className="size-4" aria-hidden />
+            <span className="flex-1">{label}</span>
+            {disabled && (
+              <Badge variant="outline" className="text-[10px]">
+                Phase {phase}
+              </Badge>
+            )}
+          </>
+        );
+        return disabled ? (
+          <span key={href} className={classes} aria-disabled="true">
+            {content}
+          </span>
+        ) : (
+          <Link key={href} href={href} className={classes} aria-current={active ? "page" : undefined}>
+            {content}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+function ActiveNavList() {
+  return <NavList pathname={usePathname()} />;
+}
+
 function Sidebar() {
-  const pathname = usePathname();
   const router = useRouter();
   const session = useSession();
 
@@ -58,38 +98,10 @@ function Sidebar() {
         </div>
       </div>
       <Separator />
-      <nav className="flex-1 space-y-1 p-2" aria-label="Main">
-        {NAV.map(({ href, label, icon: Icon, phase }) => {
-          const active = pathname === href;
-          const disabled = phase !== null;
-          const classes = cn(
-            "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
-            active && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
-            disabled ? "cursor-not-allowed text-muted-foreground" : "hover:bg-sidebar-accent",
-          );
-          const content = (
-            <>
-              <Icon className="size-4" aria-hidden />
-              <span className="flex-1">{label}</span>
-              {disabled && (
-                <Badge variant="outline" className="text-[10px]">
-                  Phase {phase}
-                </Badge>
-              )}
-            </>
-          );
-          return disabled ? (
-            <span key={href} className={classes} aria-disabled="true">
-              {content}
-            </span>
-          ) : (
-            <Link key={href} href={href} className={classes} aria-current={active ? "page" : undefined}>
-              {content}
-            </Link>
-          );
-        })}
-      </nav>
-      <Separator />
+      {/* The current path is URL data: read it inside Suspense (Next.js 16). */}
+      <Suspense fallback={<NavList pathname={null} />}>
+        <ActiveNavList />
+      </Suspense>
       <div className="space-y-2 p-4">
         {session ? (
           <div className="min-w-0">

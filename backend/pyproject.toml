@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.162.4",
+    "httpx>=0.28.1",
     "psycopg[binary,pool]>=3.3.8",
     "pwdlib[argon2]>=0.3.1",
     "pydantic-settings>=2.16.2",
@@ -19,6 +20,21 @@ dependencies = [
 # No [build-system]: this is an application, not a library we publish.
 [tool.uv]
 package = false
+# Local `uv sync` installs everything (incl. the heavy ingestion stack, so tests
+# can run Docling). Docker images pick groups explicitly (see Dockerfile).
+default-groups = ["dev", "ingestion"]
+
+# CPU-only PyTorch (Docling's layout/table models). The default Linux wheels bundle
+# NVIDIA CUDA libraries (several GB) that we don't use. `explicit = true` means
+# this index is ONLY used for the packages mapped to it below.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
 
 # ---------------------------------------------------------------- ruff
 [tool.ruff]
@@ -55,11 +71,22 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "slow: runs the real Docling models (about 1 minute; deselect with -m \"not slow\")",
+]
 
 [dependency-groups]
 dev = [
     "mypy>=2.4.1",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1.post1",
+    "python-docx>=1.2.0",
+    "reportlab>=5.1.0",
     "ruff>=0.17.4",
+]
+ingestion = [
+    "docling>=2.150.0",
+    "torch>=2.15.0",
+    "torchvision>=0.29.2",
+    "trafilatura>=2.3.1",
 ]

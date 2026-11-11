@@ -42,6 +42,7 @@ Important: **a public widget key is not a secret.** Security comes from the orig
 | Permission | org_admin | editor | agent | viewer | widget session |
 |---|:-:|:-:|:-:|:-:|:-:|
 | Manage users, API keys, integrations | ✓ | | | | |
+| View knowledge sources & extracted text | ✓ | ✓ | ✓ | ✓ | |
 | Upload sources, edit drafts | ✓ | ✓ | | | |
 | Approve / reject / delete knowledge | ✓ | ✓ | | | |
 | View conversations & tickets | ✓ | ✓ | ✓ | ✓ | |

@@ -54,7 +54,11 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 async function rawRequest(path: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  // JSON bodies get a JSON content type; FormData (file uploads) must set its own
+  // multipart boundary, so we leave its Content-Type alone.
+  if (typeof init.body === "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   if (!SAFE_METHODS.has(method)) {
     const csrf = readCookie("csp_csrf");
     if (csrf) headers.set("X-CSRF-Token", decodeURIComponent(csrf));
@@ -100,7 +104,8 @@ function refreshSession(): Promise<boolean> {
   return refreshInFlight;
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Send a request; on 401 refresh the session once and retry. Throws ApiError if not ok. */
+async function send(path: string, init: RequestInit): Promise<Response> {
   let res = await rawRequest(path, init);
   // Refresh on 401 for every call except the endpoints that manage the session
   // themselves (refreshing on a failed login/refresh would loop or be pointless).
@@ -108,8 +113,17 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (await refreshSession()) res = await rawRequest(path, init);
   }
   if (!res.ok) throw await toApiError(res);
+  return res;
+}
+
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await send(path, init);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+export async function apiText(path: string, init: RequestInit = {}): Promise<string> {
+  return (await send(path, init)).text();
 }
 
 export const authApi = {
@@ -121,4 +135,65 @@ export const authApi = {
   logout: () => api<void>("/api/v1/auth/logout", { method: "POST" }),
   me: () => api<Me>("/api/v1/auth/me"),
   organization: () => api<Organization>("/api/v1/organization"),
+};
+
+// ------------------------------------------------------------------ knowledge
+
+export type JobStatus = "queued" | "fetching" | "extracting" | "extracted" | "failed";
+
+export interface IngestionJob {
+  id: string;
+  status: JobStatus;
+  progress: number;
+  attempts: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface KnowledgeSource {
+  id: string;
+  name: string;
+  source_type: "pdf" | "docx" | "html" | "markdown" | "text" | "url";
+  uri: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  page_count: number | null;
+  created_at: string;
+  job: IngestionJob | null;
+}
+
+export interface KnowledgeSourceDetail extends KnowledgeSource {
+  sha256: string | null;
+  outline: { text: string; page: number | null }[];
+  stats: Record<string, unknown>;
+}
+
+export interface UploadItem {
+  filename: string;
+  status: "created" | "duplicate" | "rejected";
+  error: string | null;
+  source: KnowledgeSource | null;
+}
+
+export const ACTIVE_JOB_STATUSES: JobStatus[] = ["queued", "fetching", "extracting"];
+
+export const knowledgeApi = {
+  list: () => api<KnowledgeSource[]>("/api/v1/knowledge/sources"),
+  get: (id: string) => api<KnowledgeSourceDetail>(`/api/v1/knowledge/sources/${encodeURIComponent(id)}`),
+  extracted: (id: string) => apiText(`/api/v1/knowledge/sources/${encodeURIComponent(id)}/extracted`),
+  upload: (files: File[]) => {
+    const form = new FormData();
+    for (const file of files) form.append("files", file, file.name);
+    return api<{ items: UploadItem[] }>("/api/v1/knowledge/sources", { method: "POST", body: form });
+  },
+  addUrl: (url: string) =>
+    api<KnowledgeSource>("/api/v1/knowledge/sources/url", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  retry: (id: string) =>
+    api<KnowledgeSource>(`/api/v1/knowledge/sources/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  remove: (id: string) =>
+    api<void>(`/api/v1/knowledge/sources/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

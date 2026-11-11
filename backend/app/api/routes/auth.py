@@ -14,10 +14,10 @@ from app.api.deps import (
     REFRESH_COOKIE,
     CurrentPrincipal,
     DbSession,
-    Principal,
 )
 from app.core import rate_limit
 from app.core.config import get_settings
+from app.core.principal import Principal
 from app.core.rbac import ROLE_PERMISSIONS
 from app.core.security import new_csrf_token
 from app.schemas.auth import AuthResponse, LoginRequest, MeResponse

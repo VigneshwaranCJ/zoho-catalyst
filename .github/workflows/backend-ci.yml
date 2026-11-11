@@ -54,8 +54,14 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install Python 3.12 and dependencies
+      - name: Install Python 3.12 and dependencies (incl. Docling, CPU-only PyTorch)
         run: uv sync --frozen
+
+      - name: Cache Docling models (Hugging Face)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: docling-models-${{ hashFiles('backend/uv.lock') }}
 
       - name: Create app role and test database (same script Docker uses)
         working-directory: .
@@ -72,4 +78,10 @@ jobs:
         run: uv run mypy app scripts
 
       - name: Tests
-        run: uv run pytest -q
+        run: uv run pytest -q -m "not slow"
+
+      - name: Migrations apply cleanly and match the models (no drift)
+        run: uv run alembic upgrade head && uv run alembic check
+
+      - name: Golden extraction tests (real Docling models)
+        run: uv run pytest -q -m slow

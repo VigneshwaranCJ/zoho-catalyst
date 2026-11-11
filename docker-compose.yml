@@ -60,7 +60,8 @@ services:
     ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
 
   migrate:                            # one-shot: apply DB migrations, then exit
-    build: ./backend
+    image: csp-api
+    build: { context: ./backend, target: api }
     environment: *backend-env
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -68,20 +69,26 @@ services:
     restart: "no"
 
   api:
-    build: ./backend
+    image: csp-api
+    build: { context: ./backend, target: api }
     environment: *backend-env
     ports: ["127.0.0.1:8000:8000"]
+    volumes: ["storage:/data/storage"]   # uploaded originals (shared with worker)
     depends_on:
       migrate: { condition: service_completed_successfully }
       valkey: { condition: service_healthy }
 
-  worker:
-    build: ./backend
+  worker:                             # Docling + CPU PyTorch + models (large image, slow first build)
+    image: csp-worker
+    build:
+      context: ./backend
+      target: worker
+      args: { UV_GROUPS: "--group ingestion" }
     environment: *backend-env
-    command: ["python", "-m", "app.worker"]
-    healthcheck: { disable: true }
+    volumes: ["storage:/data/storage"]
     depends_on:
       migrate: { condition: service_completed_successfully }
 
 volumes:
   pgdata:
+  storage:

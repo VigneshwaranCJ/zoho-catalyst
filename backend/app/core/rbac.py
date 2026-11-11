@@ -14,13 +14,14 @@ class Permission(StrEnum):
     MANAGE_ORG = "org:manage"  # users, API keys, integrations
     EDIT_KNOWLEDGE = "knowledge:edit"  # upload sources, edit drafts
     PUBLISH_KNOWLEDGE = "knowledge:publish"  # approve / reject / delete
+    VIEW_KNOWLEDGE = "knowledge:view"  # browse sources and extracted text
     VIEW_CONVERSATIONS = "conversations:view"
     HANDLE_TICKETS = "tickets:handle"  # reply as human, change status
     APPROVE_AGENT_ACTIONS = "agent:approve"  # human-in-the-loop approvals
     VIEW_ANALYTICS = "analytics:view"
 
 
-_VIEW = {Permission.VIEW_CONVERSATIONS, Permission.VIEW_ANALYTICS}
+_VIEW = {Permission.VIEW_KNOWLEDGE, Permission.VIEW_CONVERSATIONS, Permission.VIEW_ANALYTICS}
 
 ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
     "org_admin": frozenset(Permission),

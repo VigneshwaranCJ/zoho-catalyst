@@ -49,6 +49,28 @@ class Settings(BaseSettings):
     # --- Valkey / Redis ---
     redis_url: str = "redis://127.0.0.1:6379/0"
 
+    # --- Ingestion ---
+    # Where original uploads and extraction outputs are stored (shared by api + worker).
+    storage_dir: Path = _REPO_ROOT / "storage"
+    max_upload_mb: int = 50
+    max_files_per_upload: int = 20
+    # URL ingestion (SSRF-hardened fetcher)
+    fetch_timeout_seconds: float = 15.0
+    fetch_max_mb: int = 10
+    fetch_max_redirects: int = 5
+    fetch_user_agent: str = "CSPKnowledgeBot/0.1 (+customer-support-platform)"
+    # Docling: folder with pre-downloaded models (Docker). None = Hugging Face cache.
+    docling_artifacts_path: Path | None = None
+    docling_document_timeout_seconds: float = 300.0
+    # Worker
+    worker_poll_seconds: float = 2.0
+    worker_stale_lock_minutes: int = 15
+    ingestion_max_attempts: int = 3
+
+    @property
+    def max_upload_bytes(self) -> int:
+        return self.max_upload_mb * 1024 * 1024
+
     # --- Seed (development only) ---
     seed_admin_email: str = "admin@technova.example"
     seed_admin_password: SecretStr = SecretStr("")

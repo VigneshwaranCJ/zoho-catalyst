@@ -1,14 +1,13 @@
 """FastAPI dependencies: DB session, current user, tenant scope, RBAC, CSRF."""
 
 import secrets
-import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.principal import Principal
 from app.core.rbac import Permission, has_permission
 from app.core.security import InvalidTokenError, decode_token
 from app.db.session import get_sessionmaker, set_tenant
@@ -38,15 +37,6 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 # response, so a failed commit would be reported as success (verified by
 # tests/integration/test_transactions.py).
 DbSession = Annotated[AsyncSession, Depends(get_db, scope="function")]
-
-
-@dataclass(frozen=True, slots=True)
-class Principal:
-    user_id: uuid.UUID
-    organization_id: uuid.UUID
-    role: str
-    email: str
-    display_name: str
 
 
 def _unauthorized(detail: str = "Not authenticated") -> HTTPException:

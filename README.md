@@ -2,13 +2,13 @@
 
 **OKF** (knowledge) · **LangGraph** (orchestration) · **Claude** (intelligence) · **UTCP** (tools) · **FastAPI** · **PostgreSQL** · **Next.js**
 
-> **Status: Phase 2 (project setup) complete.** Next: Phase 3, document ingestion. See the [roadmap](docs/DEVELOPMENT_ROADMAP.md).
+> **Status: Phase 3 (document ingestion) complete.** Next: Phase 4, OKF knowledge engine. See the [roadmap](docs/DEVELOPMENT_ROADMAP.md).
 
 ## What runs today
 
 | Service | URL | What it is |
 |---|---|---|
-| Dashboard (Next.js 16) | http://localhost:3000 | Login + dashboard shell |
+| Dashboard (Next.js 16) | http://localhost:3000 | Login, dashboard, **Knowledge** (upload documents, add web pages, view extracted text) |
 | API (FastAPI) | http://localhost:8000/docs | Interactive API docs (Swagger) |
 | PostgreSQL 18 | `127.0.0.1:5433` | App database (host port 5433 so it never clashes with a local Postgres on 5432) |
 | Valkey 9 | `127.0.0.1:6379` | Rate limits, locks (Redis-compatible) |
@@ -84,7 +84,8 @@ $env:PORT=8001; uv run python -m app.dev # API on :8001 (the Docker api already 
 ```powershell
 cd backend
 docker compose up -d postgres valkey   # tests use the real Postgres (database csp_test) and Valkey (db 15)
-uv run pytest -q                       # expect: 51 passed
+uv run pytest -q -m "not slow"         # fast tests (expect: 119 passed)
+uv run pytest -q -m slow               # golden tests with the real Docling models (~1 min)
 uv run ruff check .                    # lint
 uv run ruff format .                   # auto-format
 uv run mypy app scripts                # strict type check
@@ -122,20 +123,24 @@ docker compose down -v                # stop AND delete the database volume (fre
 | `ports are not available: ... 5432` | Another PostgreSQL is installed locally. That's why we use host port **5433** (`POSTGRES_HOST_PORT` in `.env`) |
 | Tests or API very slow on Windows | Use `127.0.0.1`, not `localhost`, in `.env` (`localhost` tries IPv6 first and waits) |
 | `Psycopg cannot use the 'ProactorEventLoop'` | Start the API with `uv run python -m app.dev`, not `fastapi dev` |
+| First `docker compose build` takes a long time | The worker image includes PyTorch (CPU) and Docling's models (downloaded at build time). Later builds are cached |
+| Upload stays "Queued" | The worker isn't running: `docker compose ps worker`, `docker compose logs worker`. It logs `worker_ready` once models are loaded (~30 s) |
+| `To support symlinks on Windows...` warning when running Docling locally | Harmless: Hugging Face copies model files instead of linking them |
 | Login returns 429 | 5 failed attempts in 15 minutes for that email from that IP. Wait, or run `docker compose restart valkey` in development. In production, set `FORWARDED_ALLOW_IPS` to your reverse proxy so the API sees real visitor IPs (otherwise all visitors share one IP and an attacker could lock out an account) |
 | `/ready` shows `postgres: error` | Run `docker compose ps`. Check that the `migrate` service exited with code 0 (`docker compose logs migrate`) |
 
 ## Project layout
 
 ```
-backend/    FastAPI app (app/), Alembic migrations, tests, Dockerfile
+backend/    FastAPI app (app/), Alembic migrations, tests, Dockerfile (targets: api, worker)
+sample-data/technova/  Fictional TechNova SmartAir X1 manual (PDF), policies (DOCX), FAQ page (HTML)
 frontend/   Next.js 16 dashboard (App Router, Tailwind 4, shadcn/ui)
 docker/     Postgres init script (creates the RLS-restricted app role + test DB)
 docs/       Architecture and design documents
 .github/    CI: backend tests, frontend build, dependency audits
 ```
 
-## API endpoints (Phase 2)
+## API endpoints
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -148,6 +153,13 @@ docs/       Architecture and design documents
 | GET | `/api/v1/organization` | session | Current organization |
 | PATCH | `/api/v1/organization` | `org:manage` + CSRF | Rename organization (audited) |
 | GET | `/api/v1/users` | `org:manage` | List users in your organization |
+| POST | `/api/v1/knowledge/sources` | `knowledge:edit` + CSRF | Upload up to 20 files (multipart `files`). Per-file result: created / duplicate / rejected |
+| POST | `/api/v1/knowledge/sources/url` | `knowledge:edit` + CSRF | Queue a public web page (private/internal addresses refused) |
+| GET | `/api/v1/knowledge/sources` | `knowledge:view` | List sources with processing status |
+| GET | `/api/v1/knowledge/sources/{id}` | `knowledge:view` | Details, outline (headings + pages), extraction stats |
+| GET | `/api/v1/knowledge/sources/{id}/extracted` | `knowledge:view` | Extracted text as Markdown with `<!-- page: N -->` markers |
+| POST | `/api/v1/knowledge/sources/{id}/retry` | `knowledge:edit` + CSRF | Re-run a failed extraction |
+| DELETE | `/api/v1/knowledge/sources/{id}` | `knowledge:publish` + CSRF | Soft-delete a source |
 
 Full, live documentation: http://localhost:8000/docs
 
