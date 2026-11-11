@@ -3,7 +3,7 @@
 
 **OKF** (knowledge) · **LangGraph** (orchestration) · **Claude** (intelligence) · **UTCP** (tools) · **FastAPI** · **PostgreSQL** · **Next.js**
 
-> **Status: Phase 4 (OKF knowledge engine) complete.** Next: Phase 5, the AI agent. See the [roadmap](docs/DEVELOPMENT_ROADMAP.md).
+> **Status: Phase 4 (OKF knowledge engine) built and tested with a stand-in for Claude; the live AI run is pending an API key.** Next: Phase 5, the AI agent. See the [roadmap](docs/DEVELOPMENT_ROADMAP.md).
 
 ## What runs today
 

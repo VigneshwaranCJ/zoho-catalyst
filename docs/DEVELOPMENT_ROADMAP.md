@@ -46,6 +46,17 @@ Tasks: upload API (multi-file), magic-byte validation, storage, `ingestion_jobs`
 Tasks: OKF parser/writer (round-trip unknown keys), conformance validator + profile JSON Schema, evaluate `okflib`, Claude plan/draft with structured outputs, quote verification, injection scan, per-org Git repo + draft branches, review/approve/reject API, indexer → `knowledge_sections` FTS, `search_knowledge`, version history, update/delete.
 **Exit tests:** generated SmartAir bundle passes OKF v0.2 conformance + profile. 100 % of footnote quotes are found on cited pages. Approve creates a commit + live sections. Search finds the right section for 20 test queries (≥ 90 % recall@5). Org A cannot see org B's knowledge.
 
+**Status (2026-11-11, tag `m4-okf-engine`): built and verified with a scripted stand-in for Claude.**
+- ✅ Generated bundle passes OKF v0.2 conformance + profile (fake-Claude drafts and the published Git bundle).
+- ✅ Quotes are verified deterministically; unverifiable statements are dropped (100 % of *published* footnotes have verified quotes by construction).
+- ✅ Approve creates one Git commit + live search sections; reject, edit, conflict detection, archive and injection acknowledgement tested.
+- ✅ Search recall@5 = **90 %** (18/20). Misses are paraphrases ("loud" vs "noise level", "heavy" vs "weight"); Phase 5's catalog selection is meant to close this.
+- ✅ Organization isolation (API, search, Git repos).
+
+**Open items (carry into Phase 5):**
+- ⏳ **Live run with real Claude** on the TechNova samples: not done because `ANTHROPIC_API_KEY` wasn't available. Measure: concepts planned, % statements passing quote verification on first try / after repair, drafts with validation errors, cost per document. Do this as the first step of Phase 5.
+- ⏳ Evaluate `okflib` as an independent cross-check of our OKF validator (not done).
+
 ## Phase 5: Agent development
 Tasks: Anthropic client wrapper (models from config, caching, refusal handling, Langfuse `@observe`), typed state, the 11 nodes, conditional routing, `AsyncPostgresSaver`, RetryPolicy, timeouts, error handlers, native-citations answer generation, citation verifier, confidence scorer, playground endpoint (non-streaming first, then SSE).
 **Exit tests:** the 6 sample questions behave as expected (5 = escalation path. "Wi-Fi?" answered only if the manual says so, otherwise "not in our documentation"). Agent unit tests run with a **fake LLM** (deterministic). Citation tests: no citation without a matching quote. Follow-up question test ("and how long does that take?").
