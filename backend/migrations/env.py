@@ -30,7 +30,7 @@ def include_object(obj, name, type_, reflected, compare_to):  # type: ignore[no-
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=get_settings().owner_database_url,
+        url=get_settings().owner_database_url.render_as_string(hide_password=False),
         target_metadata=target_metadata,
         literal_binds=True,
         include_object=include_object,

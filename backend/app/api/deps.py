@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.rbac import Permission, has_permission
 from app.core.security import InvalidTokenError, decode_token
 from app.db.session import get_sessionmaker, set_tenant
+from app.models.organization import Organization
 from app.models.user import User
 
 ACCESS_COOKIE = "csp_access"
@@ -32,7 +33,11 @@ async def get_db() -> AsyncIterator[AsyncSession]:
             raise
 
 
-DbSession = Annotated[AsyncSession, Depends(get_db)]
+# scope="function": the commit above runs BEFORE the response is sent. With
+# FastAPI's default, code after `yield` runs after the client already has its
+# response, so a failed commit would be reported as success (verified by
+# tests/integration/test_transactions.py).
+DbSession = Annotated[AsyncSession, Depends(get_db, scope="function")]
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,10 +85,14 @@ async def get_current_principal(request: Request, session: DbSession) -> Princip
     # Scope this request's transaction to the user's organization (RLS).
     await set_tenant(session, claims.organization_id)
 
-    # Re-read the user every request so deactivation / role changes apply immediately.
+    # Re-read user AND organization every request so deactivation, role changes
+    # and organization suspension apply immediately (not when the token expires).
     user = await session.get(User, claims.user_id)
     if user is None or not user.is_active:
         raise _unauthorized("Account disabled")
+    org = await session.get(Organization, claims.organization_id)
+    if org is None or org.status != "active":
+        raise _unauthorized("Organization suspended")
 
     return Principal(
         user_id=user.id,

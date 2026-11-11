@@ -10,6 +10,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, authApi } from "@/lib/api";
+import { safeNextPath } from "@/lib/navigation";
+
+function organizationChoices(err: unknown): string[] | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const detail = err.detail as { organizations?: unknown } | undefined;
+  const orgs = detail?.organizations;
+  return Array.isArray(orgs) && orgs.every((o) => typeof o === "string") ? orgs : null;
+}
 
 function LoginForm() {
   const router = useRouter();
@@ -18,18 +26,27 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Filled only when the same email + password exists in several organizations.
+  const [organizations, setOrganizations] = useState<string[] | null>(null);
+  const [organization, setOrganization] = useState("");
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setPending(true);
     try {
-      await authApi.login(email, password);
-      const next = searchParams.get("next");
-      // Only allow internal paths, never "//evil.com" (open-redirect protection).
-      router.replace(next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard");
+      await authApi.login(email, password, organization || undefined);
+      // Only ever redirect within this site (open-redirect protection).
+      router.replace(safeNextPath(searchParams.get("next"), window.location.origin));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not reach the server.");
+      const choices = organizationChoices(err);
+      if (choices) {
+        setOrganizations(choices);
+        setOrganization(choices[0]);
+        setError(null);
+      } else {
+        setError(err instanceof ApiError ? err.message : "Could not reach the server.");
+      }
       setPending(false);
     }
   }
@@ -72,6 +89,26 @@ function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
+          {organizations && (
+            <div className="grid gap-2">
+              <Label htmlFor="organization">Organization</Label>
+              <select
+                id="organization"
+                className="h-9 rounded-md border bg-transparent px-3 text-sm shadow-xs"
+                value={organization}
+                onChange={(e) => setOrganization(e.target.value)}
+              >
+                {organizations.map((slug) => (
+                  <option key={slug} value={slug}>
+                    {slug}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Your account exists in several organizations. Choose one.
+              </p>
+            </div>
+          )}
           <Button type="submit" disabled={pending || !email || !password}>
             {pending && <Loader2 className="animate-spin" aria-hidden />}
             Sign in

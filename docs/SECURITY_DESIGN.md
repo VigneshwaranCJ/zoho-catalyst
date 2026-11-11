@@ -119,7 +119,7 @@ Implemented with Redis (or Valkey) using a sliding-window counter:
 | Per IP | 20 msg/min |
 | Per conversation | 10 msg/min, 200 messages total |
 | Ticket creation | 1 per conversation, 50 per org per hour |
-| Login attempts | 5 per 15 min per account+IP, then backoff |
+| Login attempts | 5 per 15 min per account+IP (real client IP via `X-Forwarded-For` from trusted proxies only: `FORWARDED_ALLOW_IPS`) |
 | Per-org daily LLM token budget | configurable. When it runs out, the widget shows "please contact support" and offers a ticket |
 
 ## 10. Transport & browser security

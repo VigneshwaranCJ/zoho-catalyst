@@ -84,7 +84,7 @@ $env:PORT=8001; uv run python -m app.dev # API on :8001 (the Docker api already 
 ```powershell
 cd backend
 docker compose up -d postgres valkey   # tests use the real Postgres (database csp_test) and Valkey (db 15)
-uv run pytest -q                       # expect: 36 passed
+uv run pytest -q                       # expect: 51 passed
 uv run ruff check .                    # lint
 uv run ruff format .                   # auto-format
 uv run mypy app scripts                # strict type check
@@ -92,6 +92,7 @@ uv run mypy app scripts                # strict type check
 cd ..\frontend
 npm run lint
 npx tsc --noEmit
+npm test                               # unit tests (Node built-in runner)
 npm run build
 ```
 
@@ -121,7 +122,7 @@ docker compose down -v                # stop AND delete the database volume (fre
 | `ports are not available: ... 5432` | Another PostgreSQL is installed locally. That's why we use host port **5433** (`POSTGRES_HOST_PORT` in `.env`) |
 | Tests or API very slow on Windows | Use `127.0.0.1`, not `localhost`, in `.env` (`localhost` tries IPv6 first and waits) |
 | `Psycopg cannot use the 'ProactorEventLoop'` | Start the API with `uv run python -m app.dev`, not `fastapi dev` |
-| Login returns 429 | 5 failed attempts in 15 minutes. Wait, or run `docker compose restart valkey` in development |
+| Login returns 429 | 5 failed attempts in 15 minutes for that email from that IP. Wait, or run `docker compose restart valkey` in development. In production, set `FORWARDED_ALLOW_IPS` to your reverse proxy so the API sees real visitor IPs (otherwise all visitors share one IP and an attacker could lock out an account) |
 | `/ready` shows `postgres: error` | Run `docker compose ps`. Check that the `migrate` service exited with code 0 (`docker compose logs migrate`) |
 
 ## Project layout
@@ -141,7 +142,7 @@ docs/       Architecture and design documents
 | GET | `/health` | none | Liveness |
 | GET | `/ready` | none | PostgreSQL + Valkey reachability |
 | POST | `/api/v1/auth/login` | none (rate-limited) | Sign in. Sets httpOnly session cookies + CSRF cookie |
-| POST | `/api/v1/auth/refresh` | refresh cookie | Rotate tokens (reuse of an old token revokes all sessions) |
+| POST | `/api/v1/auth/refresh` | refresh cookie | Rotate tokens atomically. 409 = another tab refreshed in the last 30 s (retry). Reuse of an old token later revokes all sessions |
 | POST | `/api/v1/auth/logout` | refresh cookie | Revoke session |
 | GET | `/api/v1/auth/me` | session | Current user + permissions |
 | GET | `/api/v1/organization` | session | Current organization |

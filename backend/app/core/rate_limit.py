@@ -26,10 +26,13 @@ async def hit(key: str, *, limit: int, window_seconds: int) -> bool:
     an outage of the limiter must not lock every user out of the dashboard.
     """
     try:
-        client = get_redis()
-        count = await client.incr(key)
-        if count == 1:
-            await client.expire(key, window_seconds)
+        # INCR and EXPIRE in one atomic MULTI/EXEC. `nx=True` sets the expiry only
+        # when the key has none, so the window starts at the first hit and a key
+        # can never be left without a TTL (which would lock the user out forever).
+        async with get_redis().pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, window_seconds, nx=True)
+            count, _ = await pipe.execute()
         return int(count) <= limit
     except redis.RedisError as exc:
         log.warning("rate_limiter_unavailable", error=str(exc), key=key)

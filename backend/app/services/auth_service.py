@@ -2,9 +2,10 @@
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import RowMapping, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -16,8 +17,16 @@ from app.core.security import (
     verify_password,
 )
 from app.db.session import set_tenant
+from app.models.organization import Organization
 from app.models.user import RefreshToken, User
 from app.services import audit
+
+# A refresh token presented again within this window after it was rotated is
+# treated as a benign race (two browser tabs refreshing at the same moment),
+# not as theft. Outside the window, reuse revokes every session of the user.
+REUSE_GRACE = timedelta(seconds=30)
+
+_SESSION_EXPIRED = "Session expired. Please sign in again."
 
 
 class AuthError(Exception):
@@ -25,7 +34,19 @@ class AuthError(Exception):
 
 
 class OrganizationRequiredError(AuthError):
-    """Same email exists in several organizations; caller must pick one."""
+    """The password matched accounts in several organizations; caller must pick one."""
+
+    def __init__(self, organizations: list[str]) -> None:
+        super().__init__("Your account exists in several organizations. Please choose one.")
+        self.organizations = organizations
+
+
+class RefreshRaceError(AuthError):
+    """This token was rotated a moment ago by a concurrent request.
+
+    The caller must NOT clear the session cookies: the concurrent request has
+    just set fresh ones.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +77,21 @@ async def _issue_pair(
     return IssuedTokens(access, refresh, access_claims, refresh_claims)
 
 
+async def _audit_in_tenant(session: AsyncSession, org_id: uuid.UUID, **kwargs: Any) -> None:
+    """Write an audit row for a specific tenant.
+
+    Flushed immediately: RLS checks the row against the tenant that is set *at
+    insert time*, and we may switch tenants several times in one login attempt.
+    """
+    await set_tenant(session, org_id)
+    await audit.record(session, organization_id=org_id, **kwargs)
+    await session.flush()
+
+
+def _can_log_in(candidate: RowMapping) -> bool:
+    return bool(candidate["is_active"]) and candidate["organization_status"] == "active"
+
+
 async def login(
     session: AsyncSession,
     *,
@@ -77,30 +113,26 @@ async def login(
     if organization_slug:
         rows = [r for r in rows if r["organization_slug"] == organization_slug]
 
-    if len(rows) > 1:
-        raise OrganizationRequiredError("Please choose an organization.")
-
-    candidate = rows[0] if rows else None
-    password_ok = verify_password(password, candidate["password_hash"] if candidate else None)
-    if (
-        candidate is None
-        or not password_ok
-        or not candidate["is_active"]
-        or candidate["organization_status"] != "active"
-    ):
-        if candidate is not None:
-            await set_tenant(session, candidate["organization_id"])
-            await audit.record(
-                session,
-                action="auth.login_failed",
-                organization_id=candidate["organization_id"],
-                actor_type="user",
-                actor_id=str(candidate["user_id"]),
-                ip=ip,
-                user_agent=user_agent,
-            )
+    # Verify the password against every candidate BEFORE revealing anything,
+    # so "this email exists in several organizations" is never leaked to
+    # someone who doesn't know the password.
+    if not rows:
+        verify_password(password, None)  # same work as a real check (timing)
         raise AuthError("Invalid email or password.")
+    matching = [r for r in rows if verify_password(password, r["password_hash"])]
+    usable = [r for r in matching if _can_log_in(r)]
 
+    if not usable:
+        for r in rows:
+            await _audit_in_tenant(
+                session, r["organization_id"], action="auth.login_failed",
+                actor_type="user", actor_id=str(r["user_id"]), ip=ip, user_agent=user_agent,
+            )  # fmt: skip
+        raise AuthError("Invalid email or password.")
+    if len(usable) > 1:
+        raise OrganizationRequiredError(sorted(r["organization_slug"] for r in usable))
+
+    candidate = usable[0]
     org_id: uuid.UUID = candidate["organization_id"]
     user_id: uuid.UUID = candidate["user_id"]
     await set_tenant(session, org_id)
@@ -123,22 +155,39 @@ async def login(
 async def refresh(session: AsyncSession, *, refresh_token: str) -> IssuedTokens:
     """Rotate: the old refresh token is revoked and a new pair is issued.
 
-    If a revoked token is presented again (possible theft), all of that user's
-    refresh tokens are revoked.
+    * The rotation is ATOMIC: a single `UPDATE ... WHERE revoked_at IS NULL`
+      claims the token, so two concurrent requests can never both succeed.
+    * Reuse shortly after rotation = concurrent tabs -> RefreshRaceError.
+    * Reuse later = probable theft -> every refresh token of the user is revoked.
     """
     try:
         claims = decode_token(refresh_token, "refresh")
     except InvalidTokenError as exc:
-        raise AuthError("Session expired. Please sign in again.") from exc
+        raise AuthError(_SESSION_EXPIRED) from exc
 
     await set_tenant(session, claims.organization_id)
-    stored = await session.scalar(
-        select(RefreshToken).where(RefreshToken.jti_hash == sha256_hex(claims.jti))
-    )
+    jti_hash = sha256_hex(claims.jti)
     now = datetime.now(UTC)
-    if stored is None or stored.expires_at <= now:
-        raise AuthError("Session expired. Please sign in again.")
-    if stored.revoked_at is not None:
+
+    claimed_user_id = await session.scalar(
+        update(RefreshToken)
+        .where(
+            RefreshToken.jti_hash == jti_hash,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > now,
+        )
+        .values(revoked_at=now, rotated_at=now)
+        .returning(RefreshToken.user_id)
+    )
+
+    if claimed_user_id is None:
+        stored = await session.scalar(select(RefreshToken).where(RefreshToken.jti_hash == jti_hash))
+        if stored is None or stored.revoked_at is None or stored.expires_at <= now:
+            raise AuthError(_SESSION_EXPIRED)
+        # Grace only for tokens that were *rotated* moments ago (another tab).
+        # Tokens revoked by logout or theft detection never get it.
+        if stored.rotated_at is not None and now - stored.rotated_at <= REUSE_GRACE:
+            raise RefreshRaceError(_SESSION_EXPIRED)
         await session.execute(
             update(RefreshToken)
             .where(RefreshToken.user_id == stored.user_id, RefreshToken.revoked_at.is_(None))
@@ -151,13 +200,12 @@ async def refresh(session: AsyncSession, *, refresh_token: str) -> IssuedTokens:
             actor_type="user",
             actor_id=str(claims.user_id),
         )
-        raise AuthError("Session expired. Please sign in again.")
+        raise AuthError(_SESSION_EXPIRED)
 
-    user = await session.get(User, stored.user_id)
-    if user is None or not user.is_active:
-        raise AuthError("Session expired. Please sign in again.")
-
-    stored.revoked_at = now
+    user = await session.get(User, claimed_user_id)
+    org = await session.get(Organization, claims.organization_id)
+    if user is None or not user.is_active or org is None or org.status != "active":
+        raise AuthError(_SESSION_EXPIRED)
     return await _issue_pair(session, user.id, user.organization_id, user.role)
 
 

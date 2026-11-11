@@ -34,6 +34,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Raw `detail` from FastAPI, for errors that carry data (e.g. org choices). */
+    public detail?: unknown,
   ) {
     super(message);
   }
@@ -60,33 +62,61 @@ async function rawRequest(path: string, init: RequestInit = {}): Promise<Respons
   return fetch(path, { ...init, method, headers, credentials: "same-origin" });
 }
 
-async function errorMessage(res: Response): Promise<string> {
+async function toApiError(res: Response): Promise<ApiError> {
+  let detail: unknown;
   try {
-    const body = await res.json();
-    if (typeof body.detail === "string") return body.detail;
-    if (Array.isArray(body.detail)) return body.detail.map((d: { msg: string }) => d.msg).join(", ");
+    detail = (await res.json()).detail;
   } catch {
     /* not JSON */
   }
-  return `Request failed (${res.status})`;
+  let message = `Request failed (${res.status})`;
+  if (typeof detail === "string") message = detail;
+  else if (Array.isArray(detail)) message = detail.map((d: { msg: string }) => d.msg).join(", ");
+  else if (detail && typeof detail === "object" && "message" in detail) {
+    message = String((detail as { message: unknown }).message);
+  }
+  return new ApiError(res.status, message, detail);
+}
+
+const NO_REFRESH_PATHS = new Set([
+  "/api/v1/auth/login",
+  "/api/v1/auth/refresh",
+  "/api/v1/auth/logout",
+]);
+
+// Single-flight refresh: when several calls get 401 at the same moment they all
+// wait for ONE refresh request. Parallel refreshes with the same token would be
+// rejected by the server (rotation allows each refresh token to be used once).
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  refreshInFlight ??= rawRequest("/api/v1/auth/refresh", { method: "POST" })
+    // 409 = another tab refreshed a moment ago; its new cookies are already set.
+    .then((res) => res.ok || res.status === 409)
+    .catch(() => false)
+    .finally(() => {
+      refreshInFlight = null;
+    });
+  return refreshInFlight;
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res = await rawRequest(path, init);
-  if (res.status === 401 && !path.startsWith("/api/v1/auth/")) {
-    const refreshed = await rawRequest("/api/v1/auth/refresh", { method: "POST" });
-    if (refreshed.ok) res = await rawRequest(path, init);
+  // Refresh on 401 for every call except the endpoints that manage the session
+  // themselves (refreshing on a failed login/refresh would loop or be pointless).
+  if (res.status === 401 && !NO_REFRESH_PATHS.has(path)) {
+    if (await refreshSession()) res = await rawRequest(path, init);
   }
-  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  if (!res.ok) throw await toApiError(res);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
 export const authApi = {
-  login: (email: string, password: string) =>
+  login: (email: string, password: string, organizationSlug?: string) =>
     api<{ user: Me }>("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, organization_slug: organizationSlug }),
     }),
   logout: () => api<void>("/api/v1/auth/logout", { method: "POST" }),
   me: () => api<Me>("/api/v1/auth/me"),

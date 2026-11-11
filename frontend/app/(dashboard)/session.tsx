@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { ApiError, authApi, type Me, type Organization } from "@/lib/api";
@@ -23,7 +22,6 @@ export function useSession(): Session | null {
  * the page layout appears immediately and fills in when the user arrives.
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,13 +33,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       })
       .catch((err) => {
         if (cancelled) return;
-        if (err instanceof ApiError && err.status === 401) router.replace("/login");
+        // Full page navigation (not router.replace) so the app restarts cleanly
+        // from /login instead of keeping this half-loaded layout mounted.
+        if (err instanceof ApiError && err.status === 401) window.location.replace("/login");
         else setError("Could not load your session. Is the API running?");
       });
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, []);
 
   return (
     <SessionContext.Provider value={session}>

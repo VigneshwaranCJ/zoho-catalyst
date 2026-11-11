@@ -6,6 +6,7 @@ state-changing requests.
 """
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from app.api.deps import (
     ACCESS_COOKIE,
@@ -116,7 +117,12 @@ async def login(
             user_agent=request.headers.get("user-agent"),
         )
     except auth_service.OrganizationRequiredError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        # Only reached after the password was verified, so listing the
+        # organizations reveals nothing to someone without the password.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {"message": str(exc), "organizations": exc.organizations},
+        ) from exc
     except auth_service.AuthError as exc:
         await session.commit()  # keep the failed-login audit record
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
@@ -126,17 +132,30 @@ async def login(
     return _auth_response(tokens, csrf, await _principal_for(session, tokens))
 
 
-@router.post("/refresh", response_model=AuthResponse)
-async def refresh(request: Request, response: Response, session: DbSession) -> AuthResponse:
+@router.post(
+    "/refresh",
+    response_model=AuthResponse,
+    responses={401: {"description": "Session ended"}, 409: {"description": "Concurrent refresh"}},
+)
+async def refresh(
+    request: Request, response: Response, session: DbSession
+) -> AuthResponse | JSONResponse:
     token = request.cookies.get(REFRESH_COOKIE)
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
     try:
         tokens = await auth_service.refresh(session, refresh_token=token)
+    except auth_service.RefreshRaceError:
+        # Another tab refreshed a moment ago and its response carries the new
+        # cookies. Keep them: the caller should simply retry its request.
+        return JSONResponse({"detail": "Session was just refreshed. Retry."}, status_code=409)
     except auth_service.AuthError as exc:
         await session.commit()  # persist reuse-detection revocations
-        _clear_auth_cookies(response)
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+        # Return (not raise) so the cookie deletions are part of THIS response;
+        # cookies set on the injected `response` are dropped when raising.
+        failed = JSONResponse({"detail": str(exc)}, status_code=status.HTTP_401_UNAUTHORIZED)
+        _clear_auth_cookies(failed)
+        return failed
     csrf = _set_auth_cookies(response, tokens)
     return _auth_response(tokens, csrf, await _principal_for(session, tokens))
 
