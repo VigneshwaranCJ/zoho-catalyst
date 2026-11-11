@@ -31,10 +31,11 @@ with_picture_classifier=False, progress=False)" \
 # ---------------------------------------------------------------- api runtime
 FROM python:3.12-slim AS api
 RUN useradd --create-home --uid 10001 app \
- && mkdir -p /data/storage && chown app:app /data/storage
+ && mkdir -p /data/storage /data/knowledge-repos && chown app:app /data/storage /data/knowledge-repos
 WORKDIR /app
 COPY --from=builder --chown=app:app /app /app
-ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 STORAGE_DIR=/data/storage
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 STORAGE_DIR=/data/storage \
+    KNOWLEDGE_REPOS_DIR=/data/knowledge-repos
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 \

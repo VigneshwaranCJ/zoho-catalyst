@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     # --- Ingestion ---
     # Where original uploads and extraction outputs are stored (shared by api + worker).
     storage_dir: Path = _REPO_ROOT / "storage"
+    # One Git repository (OKF bundle) per organization lives under this folder.
+    knowledge_repos_dir: Path = _REPO_ROOT / "knowledge-repos"
     max_upload_mb: int = 50
     max_files_per_upload: int = 20
     # URL ingestion (SSRF-hardened fetcher)
@@ -70,6 +72,19 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    # --- Claude (Anthropic API) ---
+    anthropic_api_key: SecretStr | None = None
+    claude_main_model: str = "claude-sonnet-5-5"
+    claude_light_model: str = "claude-haiku-5-5"
+    # Model that drafts OKF knowledge (per-document, quality-sensitive). Can be set to
+    # claude-opus-5-5 for an A/B comparison (about 2x the cost).
+    knowledge_generation_model: str | None = None
+    knowledge_max_concepts: int = 12
+
+    @property
+    def llm_configured(self) -> bool:
+        return bool(self.anthropic_api_key and self.anthropic_api_key.get_secret_value().strip())
 
     # --- Seed (development only) ---
     seed_admin_email: str = "admin@technova.example"

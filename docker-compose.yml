@@ -26,6 +26,11 @@ x-backend-env: &backend-env
   SMTP_PORT: 1025
   SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@technova.example}
   SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+  # Claude (Phase 4+). Empty key = AI generation disabled (jobs stop at "extracted").
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  CLAUDE_MAIN_MODEL: ${CLAUDE_MAIN_MODEL:-claude-sonnet-5-5}
+  CLAUDE_LIGHT_MODEL: ${CLAUDE_LIGHT_MODEL:-claude-haiku-5-5}
+  KNOWLEDGE_GENERATION_MODEL: ${KNOWLEDGE_GENERATION_MODEL:-}
 
 services:
   postgres:
@@ -73,7 +78,9 @@ services:
     build: { context: ./backend, target: api }
     environment: *backend-env
     ports: ["127.0.0.1:8000:8000"]
-    volumes: ["storage:/data/storage"]   # uploaded originals (shared with worker)
+    volumes:                          # shared with worker
+      - storage:/data/storage         # uploaded originals + extracted text
+      - knowledge_repos:/data/knowledge-repos   # one Git repo (OKF bundle) per organization
     depends_on:
       migrate: { condition: service_completed_successfully }
       valkey: { condition: service_healthy }
@@ -85,10 +92,13 @@ services:
       target: worker
       args: { UV_GROUPS: "--group ingestion" }
     environment: *backend-env
-    volumes: ["storage:/data/storage"]
+    volumes:
+      - storage:/data/storage
+      - knowledge_repos:/data/knowledge-repos
     depends_on:
       migrate: { condition: service_completed_successfully }
 
 volumes:
   pgdata:
   storage:
+  knowledge_repos:

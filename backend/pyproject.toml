@@ -5,13 +5,16 @@ description = "Agentic Customer Support Knowledge Platform - backend (FastAPI + 
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
+    "anthropic>=2.8.0",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.162.4",
     "httpx>=0.28.1",
     "psycopg[binary,pool]>=3.3.8",
     "pwdlib[argon2]>=0.3.1",
     "pydantic-settings>=2.16.2",
+    "pygit2>=1.21.0",
     "pyjwt>=2.15.1",
     "redis>=8.1.0",
+    "ruamel-yaml>=0.19.1",
     "sqlalchemy[asyncio]>=2.1.8",
     "structlog>=26.1.0",
     "uuid6>=2025.0.1",
@@ -50,8 +53,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S107"]                # hardcoded test passwords are fine in tests
-"migrations/**" = ["E501"]
+"tests/**" = ["S107", "RUF001"]      # test passwords; typographic characters tested on purpose
+"tests/fixtures/**" = ["E501"]      # long factual sentences in test data
+"tests/fakes.py" = ["E501"]
+"tests/unit/test_generation.py" = ["E501"]
+"tests/integration/test_knowledge_publish.py" = ["E501"]
+"migrations/**" = ["E501", "S608"]  # migrations build DDL from constants only
 
 # ---------------------------------------------------------------- mypy
 [tool.mypy]

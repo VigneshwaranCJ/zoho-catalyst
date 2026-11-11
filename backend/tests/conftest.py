@@ -20,6 +20,8 @@ os.environ["REDIS_URL"] = os.environ.get("TEST_REDIS_URL", "redis://127.0.0.1:63
 os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 40)
 # Uploaded files go to a throwaway folder, never the developer's real storage.
 os.environ["STORAGE_DIR"] = tempfile.mkdtemp(prefix="csp-test-storage-")
+os.environ["KNOWLEDGE_REPOS_DIR"] = tempfile.mkdtemp(prefix="csp-test-repos-")
+os.environ["ANTHROPIC_API_KEY"] = ""  # tests never call the real API
 
 import httpx
 import pytest

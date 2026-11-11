@@ -13,7 +13,7 @@ import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, health, knowledge, organization
+from app.api.routes import auth, health, knowledge, knowledge_docs, organization
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import dispose_engine
@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(organization.router)
     app.include_router(knowledge.router)
+    app.include_router(knowledge_docs.router)
     return app
 
 

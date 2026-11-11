@@ -3,15 +3,24 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, Sparkles } from "lucide-react";
 
 import { JobStatusBadge } from "@/components/knowledge/job-status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ACTIVE_JOB_STATUSES, ApiError, knowledgeApi, type KnowledgeSourceDetail } from "@/lib/api";
+import {
+  ACTIVE_JOB_STATUSES,
+  ApiError,
+  knowledgeApi,
+  knowledgeDocsApi,
+  type KnowledgeSourceDetail,
+} from "@/lib/api";
 import { formatBytes, formatDateTime, SOURCE_TYPE_LABELS } from "@/lib/format";
+
+import { useSession } from "../../session";
 
 const PAGE_MARKER = /<!-- page: (\d+) -->/;
 
@@ -27,6 +36,94 @@ function splitPages(markdown: string): { page: number | null; text: string }[] {
   return pages;
 }
 
+interface GenerationStats {
+  skipped?: string;
+  model?: string;
+  drafts?: number;
+  planned?: number;
+  statements?: number;
+  dropped_statements?: number;
+  repaired_statements?: number;
+  injection_findings?: { kind: string; excerpt: string }[];
+  usage?: { calls: number; input_tokens: number; output_tokens: number; cost_usd: number };
+}
+
+/** What the AI produced for this source, and a button to run it (again). */
+function GenerationPanel({ source, onRequested }: { source: KnowledgeSourceDetail; onRequested: () => void }) {
+  const session = useSession();
+  const canEdit = session?.me.permissions.includes("knowledge:edit") ?? false;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const gen = (source.stats.generation ?? null) as GenerationStats | null;
+  const status = source.job?.status;
+  const canGenerate = canEdit && (status === "extracted" || status === "reviewed" || status === "needs_review");
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    try {
+      await knowledgeDocsApi.generate(source.id);
+      onRequested();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not start generation.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!gen && !canGenerate) return null;
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-4">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="size-4" aria-hidden /> AI knowledge generation
+          </CardTitle>
+          <CardDescription>
+            Claude turns this document into knowledge files. Every statement must quote the source,
+            and a person reviews the drafts before customers see them.
+          </CardDescription>
+        </div>
+        {canGenerate && (
+          <Button variant="outline" onClick={() => void generate()} disabled={busy}>
+            {busy && <Loader2 className="animate-spin" aria-hidden />}
+            {gen && !gen.skipped ? "Generate again" : "Generate knowledge"}
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {error && <p className="text-destructive">{error}</p>}
+        {gen?.skipped && <p className="text-muted-foreground">Not run: {gen.skipped}.</p>}
+        {gen && !gen.skipped && (
+          <>
+            <p>
+              {gen.drafts} draft(s) from {gen.planned} planned topic(s) · {gen.statements} verified statements
+              {gen.dropped_statements ? ` · ${gen.dropped_statements} dropped (unverifiable)` : ""}
+              {gen.repaired_statements ? ` · ${gen.repaired_statements} repaired` : ""}
+            </p>
+            {gen.usage && (
+              <p className="text-muted-foreground">
+                {gen.model} · {gen.usage.calls} calls · {gen.usage.input_tokens.toLocaleString()} input /{" "}
+                {gen.usage.output_tokens.toLocaleString()} output tokens · ${gen.usage.cost_usd.toFixed(4)}
+              </p>
+            )}
+            {gen.injection_findings && gen.injection_findings.length > 0 && (
+              <p className="text-red-700">
+                {gen.injection_findings.length} possible prompt-injection passage(s) found in the source.
+              </p>
+            )}
+            {status === "needs_review" && (
+              <Link href="/knowledge/review" className="font-medium underline">
+                Review the drafts →
+              </Link>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function SourceDetail() {
   const { id } = useParams<{ id: string }>();
   const [source, setSource] = useState<KnowledgeSourceDetail | null>(null);
@@ -39,7 +136,8 @@ export function SourceDetail() {
     (async () => {
       try {
         const detail = await knowledgeApi.get(id);
-        const text = detail.job?.status === "extracted" ? await knowledgeApi.extracted(id) : null;
+        const hasText = detail.job && !["queued", "fetching", "extracting", "failed"].includes(detail.job.status);
+        const text = hasText ? await knowledgeApi.extracted(id).catch(() => null) : null;
         if (cancelled) return;
         setSource(detail);
         setMarkdown(text);
@@ -101,6 +199,8 @@ export function SourceDetail() {
               <AlertDescription>{source.job.error}</AlertDescription>
             </Alert>
           )}
+
+          <GenerationPanel source={source} onRequested={() => setReloadKey((k) => k + 1)} />
 
           <div className="grid gap-4 lg:grid-cols-3">
             <Card>

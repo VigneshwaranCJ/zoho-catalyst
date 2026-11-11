@@ -133,6 +133,19 @@ async def retry_source(source_id: uuid.UUID, principal: Editor, session: DbSessi
     return SourceOut.build(source, job)
 
 
+@router.post("/sources/{source_id}/generate", response_model=SourceOut)
+async def generate_source(source_id: uuid.UUID, principal: Editor, session: DbSession) -> SourceOut:
+    """Run AI knowledge generation again (reuses the extracted text; costs API tokens)."""
+    try:
+        await svc.request_generation(session, principal, source_id)
+        source, job = await svc.get_source(session, source_id)
+    except svc.SourceNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found") from exc
+    except svc.SourceConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return SourceOut.build(source, job)
+
+
 @router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_source(source_id: uuid.UUID, principal: Publisher, session: DbSession) -> Response:
     try:

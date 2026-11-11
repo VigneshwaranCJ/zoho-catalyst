@@ -23,9 +23,18 @@ from app.db.base import Base, TenantScoped, Timestamps, UUIDPrimaryKey
 
 SOURCE_TYPES = ("pdf", "docx", "html", "markdown", "text", "url")
 
-# Phase 3 lifecycle. Phase 4 adds generating / validating / needs_review.
-JOB_STATUSES = ("queued", "fetching", "extracting", "extracted", "failed")
-ACTIVE_JOB_STATUSES = ("queued", "fetching", "extracting")
+# Job lifecycle (see app/ingestion/processor.py).
+JOB_STATUSES = (
+    "queued",
+    "fetching",
+    "extracting",
+    "extracted",  # text ready; AI generation not configured or not requested
+    "generating",  # Claude is drafting OKF documents
+    "needs_review",  # drafts waiting for a human
+    "reviewed",  # every draft of this job was approved or rejected
+    "failed",
+)
+ACTIVE_JOB_STATUSES = ("queued", "fetching", "extracting", "generating")
 
 
 class KnowledgeSource(UUIDPrimaryKey, Timestamps, TenantScoped, Base):
@@ -69,7 +78,7 @@ class IngestionJob(UUIDPrimaryKey, Timestamps, TenantScoped, Base):
             "ix_ingestion_jobs_pending",
             "run_after",
             "created_at",
-            postgresql_where=text("status IN ('queued', 'fetching', 'extracting')"),
+            postgresql_where=text("status IN ('queued', 'fetching', 'extracting', 'generating')"),
         ),
     )
 

@@ -139,7 +139,15 @@ export const authApi = {
 
 // ------------------------------------------------------------------ knowledge
 
-export type JobStatus = "queued" | "fetching" | "extracting" | "extracted" | "failed";
+export type JobStatus =
+  | "queued"
+  | "fetching"
+  | "extracting"
+  | "extracted"
+  | "generating"
+  | "needs_review"
+  | "reviewed"
+  | "failed";
 
 export interface IngestionJob {
   id: string;
@@ -176,7 +184,7 @@ export interface UploadItem {
   source: KnowledgeSource | null;
 }
 
-export const ACTIVE_JOB_STATUSES: JobStatus[] = ["queued", "fetching", "extracting"];
+export const ACTIVE_JOB_STATUSES: JobStatus[] = ["queued", "fetching", "extracting", "generating"];
 
 export const knowledgeApi = {
   list: () => api<KnowledgeSource[]>("/api/v1/knowledge/sources"),
@@ -196,4 +204,120 @@ export const knowledgeApi = {
     api<KnowledgeSource>(`/api/v1/knowledge/sources/${encodeURIComponent(id)}/retry`, { method: "POST" }),
   remove: (id: string) =>
     api<void>(`/api/v1/knowledge/sources/${encodeURIComponent(id)}`, { method: "DELETE" }),
+};
+
+// ------------------------------------------------------------------ OKF knowledge documents
+
+export interface ValidationIssue {
+  level: "error" | "warning";
+  path: string;
+  message: string;
+}
+
+export interface DraftItem {
+  version_id: string;
+  document_id: string;
+  path: string;
+  title: string;
+  doc_type: string;
+  audience: string;
+  version_no: number;
+  is_update: boolean;
+  source_id: string | null;
+  source_name: string | null;
+  job_id: string | null;
+  created_at: string;
+  error_count: number;
+  warning_count: number;
+  has_injection_warnings: boolean;
+}
+
+export interface VersionDetail {
+  version_id: string;
+  document_id: string;
+  path: string;
+  title: string;
+  doc_type: string;
+  version_no: number;
+  review_status: "pending" | "approved" | "rejected" | "superseded";
+  content: string;
+  validation: { ok: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
+  diff: string;
+  has_injection_warnings: boolean;
+  generated_by: string;
+  created_at: string;
+  reviewed_at: string | null;
+  review_note: string | null;
+  git_commit_sha: string | null;
+}
+
+export interface KnowledgeDocumentItem {
+  id: string;
+  path: string;
+  title: string;
+  doc_type: string;
+  description: string | null;
+  audience: string;
+  status: "draft" | "live" | "archived";
+  tags: string[];
+  current_version_no: number | null;
+  pending_drafts: number;
+  updated_at: string;
+}
+
+export interface KnowledgeDocumentDetail extends KnowledgeDocumentItem {
+  content: string | null;
+  trust_tier: string | null;
+  versions: {
+    version_id: string;
+    version_no: number;
+    review_status: string;
+    generated_by: string;
+    created_at: string;
+    reviewed_at: string | null;
+    git_commit_sha: string | null;
+  }[];
+}
+
+export interface SearchHit {
+  section_id: string;
+  document_id: string;
+  path: string;
+  doc_title: string;
+  doc_type: string;
+  heading: string;
+  anchor: string;
+  heading_path: string[];
+  snippet: string;
+  source_pages: number[];
+  score: number;
+}
+
+const enc = encodeURIComponent;
+
+export const knowledgeDocsApi = {
+  reviews: () => api<DraftItem[]>("/api/v1/knowledge/reviews"),
+  version: (id: string) => api<VersionDetail>(`/api/v1/knowledge/versions/${enc(id)}`),
+  approve: (versionIds: string[], note: string | null, acknowledgeWarnings: boolean) =>
+    api<{ commit_sha: string; approved: number }>("/api/v1/knowledge/versions/approve", {
+      method: "POST",
+      body: JSON.stringify({ version_ids: versionIds, note, acknowledge_warnings: acknowledgeWarnings }),
+    }),
+  reject: (id: string, note: string | null) =>
+    api<void>(`/api/v1/knowledge/versions/${enc(id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+  documents: () => api<KnowledgeDocumentItem[]>("/api/v1/knowledge/documents"),
+  document: (id: string) => api<KnowledgeDocumentDetail>(`/api/v1/knowledge/documents/${enc(id)}`),
+  edit: (id: string, content: string) =>
+    api<VersionDetail>(`/api/v1/knowledge/documents/${enc(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
+  archive: (id: string) => api<void>(`/api/v1/knowledge/documents/${enc(id)}`, { method: "DELETE" }),
+  search: (q: string) =>
+    api<{ query: string; hits: SearchHit[] }>(`/api/v1/knowledge/search?q=${enc(q)}&limit=10`),
+  generate: (sourceId: string) =>
+    api<KnowledgeSource>(`/api/v1/knowledge/sources/${enc(sourceId)}/generate`, { method: "POST" }),
 };

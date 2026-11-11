@@ -2,13 +2,13 @@
 
 **OKF** (knowledge) · **LangGraph** (orchestration) · **Claude** (intelligence) · **UTCP** (tools) · **FastAPI** · **PostgreSQL** · **Next.js**
 
-> **Status: Phase 3 (document ingestion) complete.** Next: Phase 4, OKF knowledge engine. See the [roadmap](docs/DEVELOPMENT_ROADMAP.md).
+> **Status: Phase 4 (OKF knowledge engine) complete.** Next: Phase 5, the AI agent. See the [roadmap](docs/DEVELOPMENT_ROADMAP.md).
 
 ## What runs today
 
 | Service | URL | What it is |
 |---|---|---|
-| Dashboard (Next.js 16) | http://localhost:3000 | Login, dashboard, **Knowledge** (upload documents, add web pages, view extracted text) |
+| Dashboard (Next.js 16) | http://localhost:3000 | Login, dashboard, **Knowledge**: upload documents and web pages, review AI drafts, publish, browse, search |
 | API (FastAPI) | http://localhost:8000/docs | Interactive API docs (Swagger) |
 | PostgreSQL 18 | `127.0.0.1:5433` | App database (host port 5433 so it never clashes with a local Postgres on 5432) |
 | Valkey 9 | `127.0.0.1:6379` | Rate limits, locks (Redis-compatible) |
@@ -65,6 +65,23 @@ npm run dev
 #   open http://localhost:3000 and sign in with SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD from .env
 ```
 
+## AI knowledge generation (Claude)
+
+Uploaded documents are turned into OKF knowledge files by Claude. To enable it:
+
+1. Create a key at https://console.anthropic.com (API Keys). **Set a monthly spend limit** (Billing → Limits).
+2. Put it in `.env` (never in code or chat): `ANTHROPIC_API_KEY=sk-ant-...`
+3. Restart: `docker compose up -d` (or restart your local worker).
+
+Without a key everything else works; uploads stop at **Text extracted**. Generating the 12-page sample manual costs roughly $0.10–0.50 (the exact cost is shown on the source's page). `KNOWLEDGE_GENERATION_MODEL=claude-opus-5-5` switches drafting to Opus for comparison (about 2× the cost).
+
+Knowledge files are stored as one Git repository per organization (Docker volume `knowledge_repos`). To look at the history:
+
+```powershell
+docker compose cp api:/data/knowledge-repos ./knowledge-repos   # copy out (the folder is git-ignored)
+git -C (Get-ChildItem .\knowledge-repos -Directory)[0].FullName log --stat
+```
+
 ## Day-to-day development
 
 ### Backend (outside Docker, for fast iteration)
@@ -84,7 +101,7 @@ $env:PORT=8001; uv run python -m app.dev # API on :8001 (the Docker api already 
 ```powershell
 cd backend
 docker compose up -d postgres valkey   # tests use the real Postgres (database csp_test) and Valkey (db 15)
-uv run pytest -q -m "not slow"         # fast tests (expect: 119 passed)
+uv run pytest -q -m "not slow"         # fast tests (expect: 195 passed; Claude is faked, no API cost)
 uv run pytest -q -m slow               # golden tests with the real Docling models (~1 min)
 uv run ruff check .                    # lint
 uv run ruff format .                   # auto-format
@@ -160,6 +177,17 @@ docs/       Architecture and design documents
 | GET | `/api/v1/knowledge/sources/{id}/extracted` | `knowledge:view` | Extracted text as Markdown with `<!-- page: N -->` markers |
 | POST | `/api/v1/knowledge/sources/{id}/retry` | `knowledge:edit` + CSRF | Re-run a failed extraction |
 | DELETE | `/api/v1/knowledge/sources/{id}` | `knowledge:publish` + CSRF | Soft-delete a source |
+| POST | `/api/v1/knowledge/sources/{id}/generate` | `knowledge:edit` + CSRF | Run AI knowledge generation again (reuses the extracted text) |
+| GET | `/api/v1/knowledge/reviews` | `knowledge:view` | Drafts waiting for review |
+| GET | `/api/v1/knowledge/versions/{id}` | `knowledge:view` | A draft or version: content, validation report, diff |
+| POST | `/api/v1/knowledge/versions/approve` | `knowledge:publish` + CSRF | Publish drafts in ONE Git commit (`acknowledge_warnings` needed if the source had prompt-injection text) |
+| POST | `/api/v1/knowledge/versions/{id}/reject` | `knowledge:publish` + CSRF | Reject a draft |
+| GET | `/api/v1/knowledge/documents` | `knowledge:view` | Published and draft documents |
+| GET | `/api/v1/knowledge/documents/{id}` | `knowledge:view` | Current content, trust tier, version history |
+| PUT | `/api/v1/knowledge/documents/{id}` | `knowledge:edit` + CSRF | Save an edit as a new draft (goes through review) |
+| DELETE | `/api/v1/knowledge/documents/{id}` | `knowledge:publish` + CSRF | Remove from published knowledge (Git keeps history) |
+| GET | `/api/v1/knowledge/search?q=` | `knowledge:view` | Full-text search over published sections (with cited pages) |
+| GET | `/api/v1/knowledge/profile-schema` | `knowledge:view` | JSON Schema of our OKF profile |
 
 Full, live documentation: http://localhost:8000/docs
 

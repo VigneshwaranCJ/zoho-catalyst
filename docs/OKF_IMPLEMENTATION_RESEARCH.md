@@ -211,7 +211,9 @@ Even then, embeddings stay a **retrieval aid**: OKF files remain the source of t
 7. **Validate**: OKF conformance + profile JSON Schema. Generate `index.md` and `log.md` entries.
 8. **Review UI**: diff vs current version, warnings, approve/reject. On approval, set `status: stable` and add `verified: human:<user>`, then **Git commit** (author = reviewer), then re-index `knowledge_sections`.
 
-Draft files exist in a Git **branch per ingestion job** (`ingest/<job-id>`). Approval merges to `main`. That gives version history, diffs and rollback for free.
+**As built (Phase 4):** drafts live in the database (`knowledge_versions`, `review_status = pending`) until a person approves them. Approval writes **one Git commit on `main`** containing the approved files plus regenerated `index.md` / `log.md`. So Git history is exactly the publication history, and there are no draft branches to merge or conflict. (The original plan used one branch per job. Drafts-in-the-database was simpler and removes merge conflicts entirely.) Concurrent edits are detected with `base_version_id`: a draft based on an outdated version is refused.
+
+Implementation: `backend/app/knowledge/` (`okf/` parse, validate, bundle files; `generation.py`; `quotes.py`; `injection.py`; `indexer.py`; `repo.py`) and `backend/app/services/knowledge_publish.py`. Profile schema: [okf-profile.schema.json](okf-profile.schema.json).
 
 ## 9. Libraries
 

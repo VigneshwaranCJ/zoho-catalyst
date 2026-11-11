@@ -1,10 +1,13 @@
 """Worker-side processing of ingestion jobs.
 
-Job lifecycle (Phase 3):
+Job lifecycle:
 
-    queued ──claim──► fetching (URLs only) ──► extracting ──► extracted
-       ▲                                │
-       └── retry with backoff ◄─────────┴──► failed (permanent error or out of attempts)
+    queued -claim-> fetching (URLs) -> extracting -> generating -> needs_review -> reviewed
+       ^                                  |             |       (all drafts approved/rejected)
+       |                                  |             +-> extracted (no API key configured)
+       +----- retry with backoff <--------+--> failed (permanent error or out of attempts)
+
+"Generate again" jobs copy the previous extraction and skip straight to generating.
 
 * Claiming uses the `ingestion_claim_next_job` database function (owner-run):
   several workers never take the same job, and jobs left "running" by a
@@ -18,8 +21,10 @@ Job lifecycle (Phase 3):
 import asyncio
 import hashlib
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import PurePosixPath
 from typing import Any
 
 from sqlalchemy import select, text
@@ -30,12 +35,33 @@ from app.db.session import get_sessionmaker, tenant_session
 from app.ingestion import validation
 from app.ingestion.extractor import DoclingExtractor, ExtractionError, markdown_header
 from app.ingestion.safe_fetch import FetchBlockedError, FetchError, SafeFetcher
+from app.knowledge.generation import GenerationError, KnowledgeGenerator, SourceInfo
+from app.knowledge.okf import document as okfdoc
+from app.llm.client import (
+    LLMError,
+    LLMNotConfiguredError,
+    LLMRefusalError,
+    LLMTruncatedError,
+    StructuredLLM,
+    get_llm,
+)
 from app.models.knowledge import IngestionJob, KnowledgeSource
+from app.models.knowledge_docs import KnowledgeDocument, KnowledgeVersion
+from app.services import knowledge_publish
 from app.storage.files import LocalFileStorage, get_storage
 
 log = get_logger("ingestion")
 
-PERMANENT_ERRORS = (FetchBlockedError, validation.UnsupportedFileError, ExtractionError)
+# Errors that retrying won't fix: fail the job immediately with a clear message.
+PERMANENT_ERRORS = (
+    FetchBlockedError,
+    validation.UnsupportedFileError,
+    ExtractionError,
+    GenerationError,
+    LLMNotConfiguredError,
+    LLMRefusalError,
+    LLMTruncatedError,
+)
 MIME_TO_KIND = {mime: kind for kind, mime in validation.MIME_TYPES.items()}
 MIME_TO_KIND["application/xhtml+xml"] = validation.FileKind.HTML
 MAX_OUTLINE = 300
@@ -71,11 +97,15 @@ class IngestionProcessor:
         extractor: DoclingExtractor,
         fetcher: SafeFetcher | None = None,
         storage: LocalFileStorage | None = None,
+        llm_factory: Callable[[], StructuredLLM] | None = None,
     ) -> None:
         self.extractor = extractor
         self.fetcher = fetcher or SafeFetcher()
         self.storage = storage or get_storage()
         self.settings = get_settings()
+        # AI generation runs when an API key is configured (or a test injects a fake LLM).
+        self.generation_enabled = llm_factory is not None or self.settings.llm_configured
+        self.llm_factory = llm_factory or get_llm
 
     async def claim(self, worker_id: str) -> ClaimedJob | None:
         async with get_sessionmaker()() as session, session.begin():
@@ -113,6 +143,7 @@ class IngestionProcessor:
             if job is None or source is None:
                 return
             attempts = job.attempts
+            existing_extraction = job.extracted_key
             snapshot = SourceSnapshot(
                 source_id=source.id,
                 source_type=source.source_type,
@@ -128,53 +159,26 @@ class IngestionProcessor:
 
         bound.info("ingestion_started", attempt=attempts, source_type=snapshot.source_type)
         try:
-            if snapshot.source_type == "url":
-                await self._update(claimed, status="fetching", progress=10, error=None)
-                kind, data, sha256 = await self._fetch_url(claimed, snapshot)
+            if existing_extraction:
+                # "Generate again" jobs reuse the text that was already extracted.
+                markdown = self.storage.get_text(existing_extraction)
             else:
-                if snapshot.storage_key is None:
-                    raise ExtractionError("The uploaded file is missing.")
-                kind = validation.FileKind(snapshot.source_type)
-                data = self.storage.get_bytes(snapshot.storage_key)
-                sha256 = hashlib.sha256(data).hexdigest()
+                markdown = await self._extract(claimed, snapshot, bound)
 
-            await self._update(claimed, status="extracting", progress=40, error=None)
-            result = await asyncio.to_thread(self.extractor.extract, kind, data)
-
-            source_id = snapshot.source_id
-            org_id = claimed.organization_id
-            md_key = self.storage.source_key(org_id, source_id, "extracted.md")
-            header = markdown_header(
-                source_name=snapshot.name, sha256=sha256, extractor=result.stats["extractor"]
-            )
-            self.storage.put_text(md_key, header + result.markdown)
-            docling_key = None
-            if result.docling_json is not None:
-                docling_key = self.storage.source_key(org_id, source_id, "docling.json.gz")
-                self.storage.put_json_gz(docling_key, result.docling_json)
-
-            stats = dict(result.stats)
-            stats["outline"] = [
-                {"text": h.text[:300], "page": h.page} for h in result.headings[:MAX_OUTLINE]
-            ]
-            async with tenant_session(org_id) as session:
-                job = await session.get(IngestionJob, claimed.job_id)
-                src = await session.get(KnowledgeSource, source_id)
-                assert job is not None and src is not None
-                job.status, job.progress, job.error = "extracted", 100, None
-                job.extracted_key, job.docling_key, job.stats = md_key, docling_key, stats
-                job.finished_at, job.locked_at, job.locked_by = datetime.now(UTC), None, None
-                src.page_count = result.page_count
-            bound.info(
-                "ingestion_finished", pages=result.page_count, duration_ms=stats["duration_ms"]
-            )
+            if not self.generation_enabled:
+                await self._finish(
+                    claimed, status="extracted", generation={"skipped": "AI not configured"}
+                )
+                return
+            await self._update(claimed, status="generating", progress=60, error=None)
+            await self._generate(claimed, markdown, bound)
         except PERMANENT_ERRORS as exc:
             bound.warning("ingestion_failed", error=str(exc), permanent=True)
             await self._fail(claimed, str(exc))
         except Exception as exc:
             message = (
                 str(exc)
-                if isinstance(exc, FetchError)
+                if isinstance(exc, FetchError | LLMError)
                 else "An internal error occurred while processing this document."
             )
             bound.error("ingestion_error", error=repr(exc), attempt=attempts, exc_info=True)
@@ -189,6 +193,112 @@ class IngestionProcessor:
                     locked_at=None,
                     locked_by=None,
                 )
+
+    async def _extract(self, claimed: ClaimedJob, snapshot: SourceSnapshot, bound: Any) -> str:
+        """Fetch (URLs) + extract text; store outputs. Returns the extracted Markdown."""
+        if snapshot.source_type == "url":
+            await self._update(claimed, status="fetching", progress=10, error=None)
+            kind, data, sha256 = await self._fetch_url(claimed, snapshot)
+        else:
+            if snapshot.storage_key is None:
+                raise ExtractionError("The uploaded file is missing.")
+            kind = validation.FileKind(snapshot.source_type)
+            data = self.storage.get_bytes(snapshot.storage_key)
+            sha256 = hashlib.sha256(data).hexdigest()
+
+        await self._update(claimed, status="extracting", progress=30, error=None)
+        result = await asyncio.to_thread(self.extractor.extract, kind, data)
+
+        source_id = snapshot.source_id
+        org_id = claimed.organization_id
+        md_key = self.storage.source_key(org_id, source_id, "extracted.md")
+        header = markdown_header(
+            source_name=snapshot.name, sha256=sha256, extractor=result.stats["extractor"]
+        )
+        markdown = header + result.markdown
+        self.storage.put_text(md_key, markdown)
+        docling_key = None
+        if result.docling_json is not None:
+            docling_key = self.storage.source_key(org_id, source_id, "docling.json.gz")
+            self.storage.put_json_gz(docling_key, result.docling_json)
+
+        stats = dict(result.stats)
+        stats["outline"] = [
+            {"text": h.text[:300], "page": h.page} for h in result.headings[:MAX_OUTLINE]
+        ]
+        async with tenant_session(org_id) as session:
+            job = await session.get(IngestionJob, claimed.job_id)
+            src = await session.get(KnowledgeSource, source_id)
+            assert job is not None and src is not None
+            job.progress, job.error = 50, None
+            job.extracted_key, job.docling_key, job.stats = md_key, docling_key, stats
+            src.page_count = result.page_count
+        bound.info("extraction_finished", pages=result.page_count, duration_ms=stats["duration_ms"])
+        return markdown
+
+    async def _generate(self, claimed: ClaimedJob, markdown: str, bound: Any) -> None:
+        org_id = claimed.organization_id
+        async with tenant_session(org_id) as session:
+            job = await session.get(IngestionJob, claimed.job_id)
+            assert job is not None
+            source = await session.get(KnowledgeSource, job.source_id)
+            assert source is not None
+            # Live documents and the source that produced their current version.
+            rows = await session.execute(
+                select(KnowledgeDocument.path, KnowledgeVersion.source_id)
+                .join(KnowledgeVersion, KnowledgeVersion.id == KnowledgeDocument.current_version_id)
+                .where(KnowledgeDocument.status == "live")
+            )
+            existing = {path: (str(sid) if sid else None) for path, sid in rows}
+            stem = PurePosixPath(source.original_name).stem or source.original_name
+            info = SourceInfo(
+                id=str(source.id),
+                name=source.original_name,
+                slug=okfdoc.slugify(stem),
+                uri=source.final_uri or source.uri,
+                sha256=source.sha256 or hashlib.sha256(markdown.encode()).hexdigest(),
+                created_at=source.created_at,
+            )
+            raw_html = None
+            if source.mime_type == "text/html" and source.storage_key:
+                raw_html = self.storage.get_bytes(source.storage_key).decode("utf-8", "replace")
+
+        model = self.settings.knowledge_generation_model or self.settings.claude_main_model
+        generator = KnowledgeGenerator(
+            self.llm_factory(), model=model, max_concepts=self.settings.knowledge_max_concepts
+        )
+        result = await generator.generate(
+            source=info,
+            markdown=markdown,
+            raw_html=raw_html,
+            existing=existing,
+            now=datetime.now(UTC),
+        )
+
+        async with tenant_session(org_id) as session:
+            versions = await knowledge_publish.save_generated_drafts(
+                session,
+                organization_id=org_id,
+                files=result.files,
+                source_id=uuid.UUID(info.id),
+                job_id=claimed.job_id,
+                generated_by=f"csp-ingestor/{model}",
+            )
+        usage = result.usage.as_dict()
+        generation = {**result.stats, "model": model, "drafts": len(versions), "usage": usage}
+        await self._finish(claimed, status="needs_review", generation=generation)
+        bound.info("generation_finished", drafts=len(versions), cost_usd=usage["cost_usd"])
+
+    async def _finish(
+        self, claimed: ClaimedJob, *, status: str, generation: dict[str, Any]
+    ) -> None:
+        async with tenant_session(claimed.organization_id) as session:
+            job = await session.get(IngestionJob, claimed.job_id)
+            if job is None:
+                return
+            job.stats = {**job.stats, "generation": generation}
+            job.status, job.progress, job.error = status, 100, None
+            job.finished_at, job.locked_at, job.locked_by = datetime.now(UTC), None, None
 
     async def _fail(self, claimed: ClaimedJob, error: str) -> None:
         await self._update(

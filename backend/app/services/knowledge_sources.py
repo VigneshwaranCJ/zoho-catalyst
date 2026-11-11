@@ -178,7 +178,8 @@ async def get_source(
 
 async def extracted_markdown(session: AsyncSession, source_id: uuid.UUID) -> str:
     _source, job = await get_source(session, source_id)
-    if job is None or job.status != "extracted" or not job.extracted_key:
+    # Available as soon as an extraction exists, whatever happened afterwards (AI, review).
+    if job is None or not job.extracted_key:
         raise SourceConflictError("The extracted text is not available yet.")
     return get_storage().get_text(job.extracted_key)
 
@@ -193,6 +194,44 @@ async def retry(session: AsyncSession, principal: Principal, source_id: uuid.UUI
     await audit.record(
         session,
         action="knowledge.source_retried",
+        organization_id=principal.organization_id,
+        actor_type="user",
+        actor_id=str(principal.user_id),
+        target_type="knowledge_source",
+        target_id=str(source.id),
+    )
+    return new_job
+
+
+async def request_generation(
+    session: AsyncSession, principal: Principal, source_id: uuid.UUID
+) -> IngestionJob:
+    """Queue AI knowledge generation again, reusing the text that was already extracted."""
+    if not get_settings().llm_configured:
+        raise SourceConflictError("AI generation is not configured (ANTHROPIC_API_KEY is missing).")
+    source, job = await get_source(session, source_id)
+    if job is not None and job.status in ACTIVE_JOB_STATUSES:
+        raise SourceConflictError("This source is already being processed.")
+    extracted = await session.scalar(
+        select(IngestionJob)
+        .where(IngestionJob.source_id == source.id, IngestionJob.extracted_key.is_not(None))
+        .order_by(IngestionJob.created_at.desc())
+        .limit(1)
+    )
+    if extracted is None:
+        raise SourceConflictError("Extract the document first (use Retry).")
+    new_job = IngestionJob(
+        organization_id=source.organization_id,
+        source_id=source.id,
+        extracted_key=extracted.extracted_key,
+        docling_key=extracted.docling_key,
+        stats={k: v for k, v in extracted.stats.items() if k != "generation"},
+    )
+    session.add(new_job)
+    await session.flush()
+    await audit.record(
+        session,
+        action="knowledge.generation_requested",
         organization_id=principal.organization_id,
         actor_type="user",
         actor_id=str(principal.user_id),

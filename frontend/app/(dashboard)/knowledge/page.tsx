@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEven
 import { FileUp, Globe, Loader2, RotateCcw, Trash2, Upload } from "lucide-react";
 
 import { JobStatusBadge } from "@/components/knowledge/job-status-badge";
+import { KnowledgeTabs } from "@/components/knowledge/knowledge-tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,6 +83,7 @@ export default function KnowledgePage() {
           numbers, and prepared for the AI assistant.
         </p>
       </div>
+      <KnowledgeTabs current="sources" />
 
       {canEdit && (
         <div className="grid gap-4 lg:grid-cols-2">
