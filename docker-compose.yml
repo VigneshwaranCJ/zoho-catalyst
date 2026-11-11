@@ -1,0 +1,82 @@
+# Local development stack.  Start:  docker compose up -d --build
+# Values come from the repo-root .env (copy .env.example first).
+name: csp
+
+x-backend-env: &backend-env
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON: ${LOG_JSON:-false}
+  JWT_SECRET: ${JWT_SECRET}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+  POSTGRES_DB: ${POSTGRES_DB:-csp}
+  POSTGRES_OWNER_USER: ${POSTGRES_OWNER_USER:-csp_owner}
+  POSTGRES_OWNER_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+  POSTGRES_APP_USER: ${POSTGRES_APP_USER:-csp_app}
+  POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+  POSTGRES_HOST: postgres           # service name on the compose network
+  POSTGRES_PORT: 5432
+  REDIS_URL: redis://valkey:6379/0
+  SMTP_HOST: mailpit
+  SMTP_PORT: 1025
+  SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@technova.example}
+  SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-csp}
+      POSTGRES_USER: ${POSTGRES_OWNER_USER:-csp_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-csp_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+    ports: ["127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"]  # host 5433: avoids clashing with a locally installed Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:9
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailpit:                            # catches all outgoing email; UI at http://localhost:8025
+    image: axllent/mailpit:latest
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+
+  migrate:                            # one-shot: apply DB migrations, then exit
+    build: ./backend
+    environment: *backend-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    build: ./backend
+    environment: *backend-env
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      valkey: { condition: service_healthy }
+
+  worker:
+    build: ./backend
+    environment: *backend-env
+    command: ["python", "-m", "app.worker"]
+    healthcheck: { disable: true }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+volumes:
+  pgdata:
