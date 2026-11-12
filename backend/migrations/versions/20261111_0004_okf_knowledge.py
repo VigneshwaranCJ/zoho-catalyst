@@ -42,8 +42,12 @@ def _org_fk() -> sa.Column:  # type: ignore[type-arg]
 
 def _timestamps() -> list[sa.Column]:  # type: ignore[type-arg]
     return [
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     ]
 
 
@@ -112,16 +116,33 @@ def upgrade() -> None:
         "knowledge_versions",
         sa.Column("id", sa.Uuid(), primary_key=True),
         _org_fk(),
-        sa.Column("document_id", sa.Uuid(), sa.ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False, index=True),
+        sa.Column(
+            "document_id",
+            sa.Uuid(),
+            sa.ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
         sa.Column("version_no", sa.Integer(), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("content_sha256", sa.String(64), nullable=False),
         sa.Column("frontmatter", postgresql.JSONB(), nullable=False),
         sa.Column("validation", postgresql.JSONB(), nullable=False),
         sa.Column("review_status", sa.String(20), nullable=False),
-        sa.Column("base_version_id", sa.Uuid(), sa.ForeignKey("knowledge_versions.id", ondelete="SET NULL")),
-        sa.Column("source_id", sa.Uuid(), sa.ForeignKey("knowledge_sources.id", ondelete="SET NULL"), index=True),
-        sa.Column("job_id", sa.Uuid(), sa.ForeignKey("ingestion_jobs.id", ondelete="SET NULL"), index=True),
+        sa.Column(
+            "base_version_id",
+            sa.Uuid(),
+            sa.ForeignKey("knowledge_versions.id", ondelete="SET NULL"),
+        ),
+        sa.Column(
+            "source_id",
+            sa.Uuid(),
+            sa.ForeignKey("knowledge_sources.id", ondelete="SET NULL"),
+            index=True,
+        ),
+        sa.Column(
+            "job_id", sa.Uuid(), sa.ForeignKey("ingestion_jobs.id", ondelete="SET NULL"), index=True
+        ),
         sa.Column("generated_by", sa.String(100), nullable=False),
         sa.Column("created_by", sa.Uuid(), sa.ForeignKey("users.id", ondelete="SET NULL")),
         sa.Column("reviewed_by", sa.Uuid(), sa.ForeignKey("users.id", ondelete="SET NULL")),
@@ -146,8 +167,19 @@ def upgrade() -> None:
         "knowledge_sections",
         sa.Column("id", sa.Uuid(), primary_key=True),
         _org_fk(),
-        sa.Column("document_id", sa.Uuid(), sa.ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False, index=True),
-        sa.Column("version_id", sa.Uuid(), sa.ForeignKey("knowledge_versions.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "document_id",
+            sa.Uuid(),
+            sa.ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+        sa.Column(
+            "version_id",
+            sa.Uuid(),
+            sa.ForeignKey("knowledge_versions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("position", sa.Integer(), nullable=False),
         sa.Column("anchor", sa.String(120), nullable=False),
         sa.Column("heading", sa.Text(), nullable=False),
@@ -156,7 +188,9 @@ def upgrade() -> None:
         sa.Column("source_pages", postgresql.ARRAY(sa.Integer()), nullable=False),
         sa.Column("audience", sa.String(20), nullable=False),
         sa.Column("doc_title", sa.Text(), nullable=False),
-        sa.Column("search_vector", postgresql.TSVECTOR(), sa.Computed(SEARCH_VECTOR, persisted=True)),
+        sa.Column(
+            "search_vector", postgresql.TSVECTOR(), sa.Computed(SEARCH_VECTOR, persisted=True)
+        ),
     )
     op.create_index(
         "ix_knowledge_sections_search", "knowledge_sections", ["search_vector"],
@@ -170,20 +204,35 @@ def upgrade() -> None:
         "knowledge_links",
         sa.Column("id", sa.Uuid(), primary_key=True),
         _org_fk(),
-        sa.Column("from_document_id", sa.Uuid(), sa.ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False, index=True),
+        sa.Column(
+            "from_document_id",
+            sa.Uuid(),
+            sa.ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
         sa.Column("to_path", sa.String(255), nullable=False),
     )
 
-    for table in ("knowledge_documents", "knowledge_versions", "knowledge_sections", "knowledge_links"):
+    for table in (
+        "knowledge_documents",
+        "knowledge_versions",
+        "knowledge_sections",
+        "knowledge_links",
+    ):
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(
             f"CREATE POLICY tenant_isolation ON {table} "
             f"USING (organization_id = {CURRENT_ORG}) WITH CHECK (organization_id = {CURRENT_ORG})"
         )
     # Documents and versions are history: never deleted by the app.
-    op.execute(f"GRANT SELECT, INSERT, UPDATE ON knowledge_documents, knowledge_versions TO {app_role}")
+    op.execute(
+        f"GRANT SELECT, INSERT, UPDATE ON knowledge_documents, knowledge_versions TO {app_role}"
+    )
     # The search index and links are rebuilt on publish.
-    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_sections, knowledge_links TO {app_role}")
+    op.execute(
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_sections, knowledge_links TO {app_role}"
+    )
 
 
 def downgrade() -> None:

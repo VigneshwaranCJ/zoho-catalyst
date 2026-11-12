@@ -18,9 +18,13 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Python dependency audit (pip-audit)
         working-directory: backend
+        # Versions are fully pinned by uv.lock, so audit them directly (--disable-pip
+        # --no-deps) instead of re-installing from PyPI: our CPU-only torch/torchvision
+        # (+cpu builds) only exist on PyTorch's index. pip-audit reports those two as
+        # "not on PyPI, not audited"; track PyTorch security advisories manually.
         run: |
           uv export --frozen --no-dev --no-hashes -o /tmp/requirements.txt
-          uvx pip-audit -r /tmp/requirements.txt
+          uvx pip-audit -r /tmp/requirements.txt --disable-pip --no-deps
       - uses: actions/setup-node@v4
         with:
           node-version: 24
