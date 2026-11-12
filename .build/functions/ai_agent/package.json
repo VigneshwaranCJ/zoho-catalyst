@@ -1,0 +1,14 @@
+{
+  "name": "ai_agent",
+  "version": "1.0.0",
+  "description": "Simple tool-using AI agent running as a Catalyst Advanced I/O function",
+  "main": "index.js",
+  "scripts": {
+    "local": "node local.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "zcatalyst-sdk-node": "2.5.0"
+  }
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalyst AI Agent</title>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>Catalyst AI Agent</h1>
+      <span id="status" class="badge">checking…</span>
+    </header>
+    <section id="log" class="log" aria-live="polite">
+      <div class="msg bot">Hi! Try: <em>"What is (12 + 8) * 3?"</em>, <em>"Remember that the demo is on Friday"</em>, <em>"Show my notes"</em> or <em>"What time is it?"</em></div>
+    </section>
+    <form id="form" class="composer">
+      <input id="input" autocomplete="off" placeholder="Ask the agent…" maxlength="4000" required>
+      <button type="submit">Send</button>
+    </form>
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>

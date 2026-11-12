@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ai-agent-local",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["functions/ai_agent/local.js"],
+      "port": 3000
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "targets": ["ai_agent"],
+    "ignore": [],
+    "source": "functions"
+  },
+  "client": {
+    "source": "client"
+  }
+}

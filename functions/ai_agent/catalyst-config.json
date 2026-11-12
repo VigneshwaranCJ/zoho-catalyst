@@ -1,0 +1,20 @@
+{
+  "deployment": {
+    "name": "ai_agent",
+    "stack": "node24",
+    "type": "advancedio",
+    "env_variables": {
+      "LLM_PROVIDER": "quickml",
+      "QUICKML_ENDPOINT_URL": "https://console.catalyst.zoho.in/quickml/v1/project/88369000000013024/genai/endpoints/glm-flash-47/generate",
+      "QUICKML_ORG_ID": "60095514957",
+      "QUICKML_ENVIRONMENT": "Development",
+      "QUICKML_PROMPT_FIELD": "prompt",
+      "RAG_ENDPOINT_URL": "https://console.catalyst.zoho.in/quickml/v1/project/88369000000013024/genai/endpoints/rag/generate",
+      "RAG_PROMPT_FIELD": "query",
+      "ZOHO_ACCOUNTS_URL": "https://accounts.zoho.in"
+    }
+  },
+  "execution": {
+    "main": "index.js"
+  }
+}
