@@ -2,9 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+<<<<<<< HEAD
       "name": "ai-agent-local",
       "runtimeExecutable": "node",
       "runtimeArgs": ["functions/ai_agent/local.js"],
+=======
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
+>>>>>>> ecdf73c62643d9770a4351cceedc98896de58374
       "port": 3000
     }
   ]

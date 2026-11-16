@@ -1,0 +1,104 @@
+# Local development stack.  Start:  docker compose up -d --build
+# Values come from the repo-root .env (copy .env.example first).
+name: csp
+
+x-backend-env: &backend-env
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON: ${LOG_JSON:-false}
+  JWT_SECRET: ${JWT_SECRET}
+  ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
+  REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
+  # Proxies allowed to set X-Forwarded-For (read by uvicorn itself). Only list
+  # your reverse proxy / Next.js server, never "*" on a publicly reachable API.
+  FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+  POSTGRES_DB: ${POSTGRES_DB:-csp}
+  POSTGRES_OWNER_USER: ${POSTGRES_OWNER_USER:-csp_owner}
+  POSTGRES_OWNER_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+  POSTGRES_APP_USER: ${POSTGRES_APP_USER:-csp_app}
+  POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+  POSTGRES_HOST: postgres           # service name on the compose network
+  POSTGRES_PORT: 5432
+  REDIS_URL: redis://valkey:6379/0
+  SMTP_HOST: mailpit
+  SMTP_PORT: 1025
+  SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@technova.example}
+  SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+  # Claude (Phase 4+). Empty key = AI generation disabled (jobs stop at "extracted").
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  CLAUDE_MAIN_MODEL: ${CLAUDE_MAIN_MODEL:-claude-sonnet-5-5}
+  CLAUDE_LIGHT_MODEL: ${CLAUDE_LIGHT_MODEL:-claude-haiku-5-5}
+  KNOWLEDGE_GENERATION_MODEL: ${KNOWLEDGE_GENERATION_MODEL:-}
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-csp}
+      POSTGRES_USER: ${POSTGRES_OWNER_USER:-csp_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-csp_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+    ports: ["127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"]  # host 5433: avoids clashing with a locally installed Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:9
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailpit:                            # catches all outgoing email; UI at http://localhost:8025
+    image: axllent/mailpit:latest
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+
+  migrate:                            # one-shot: apply DB migrations, then exit
+    image: csp-api
+    build: { context: ./backend, target: api }
+    environment: *backend-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    image: csp-api
+    build: { context: ./backend, target: api }
+    environment: *backend-env
+    ports: ["127.0.0.1:8000:8000"]
+    volumes:                          # shared with worker
+      - storage:/data/storage         # uploaded originals + extracted text
+      - knowledge_repos:/data/knowledge-repos   # one Git repo (OKF bundle) per organization
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      valkey: { condition: service_healthy }
+
+  worker:                             # Docling + CPU PyTorch + models (large image, slow first build)
+    image: csp-worker
+    build:
+      context: ./backend
+      target: worker
+      args: { UV_GROUPS: "--group ingestion" }
+    environment: *backend-env
+    volumes:
+      - storage:/data/storage
+      - knowledge_repos:/data/knowledge-repos
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+volumes:
+  pgdata:
+  storage:
+  knowledge_repos:

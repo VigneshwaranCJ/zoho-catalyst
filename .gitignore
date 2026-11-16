@@ -1,4 +1,44 @@
+<<<<<<< HEAD
 node_modules/
 .catalystrc
 *.log
 .env
+=======
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# --- Node ---
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Runtime data (Docker volumes / local storage) ---
+knowledge-repos/
+storage/
+backend/storage/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+>>>>>>> ecdf73c62643d9770a4351cceedc98896de58374

@@ -1,0 +1,99 @@
+[project]
+name = "csp-backend"
+version = "0.1.0"
+description = "Agentic Customer Support Knowledge Platform - backend (FastAPI + LangGraph + UTCP)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.20.1",
+    "anthropic>=2.8.0",
+    "fastapi[standard-no-fastapi-cloud-cli]>=0.162.4",
+    "httpx>=0.28.1",
+    "psycopg[binary,pool]>=3.3.8",
+    "pwdlib[argon2]>=0.3.1",
+    "pydantic-settings>=2.16.2",
+    "pygit2>=1.21.0",
+    "pyjwt>=2.15.1",
+    "redis>=8.1.0",
+    "ruamel-yaml>=0.19.1",
+    "sqlalchemy[asyncio]>=2.1.8",
+    "structlog>=26.1.0",
+    "uuid6>=2025.0.1",
+]
+
+# No [build-system]: this is an application, not a library we publish.
+[tool.uv]
+package = false
+# Local `uv sync` installs everything (incl. the heavy ingestion stack, so tests
+# can run Docling). Docker images pick groups explicitly (see Dockerfile).
+default-groups = ["dev", "ingestion"]
+
+# CPU-only PyTorch (Docling's layout/table models). The default Linux wheels bundle
+# NVIDIA CUDA libraries (several GB) that we don't use. `explicit = true` means
+# this index is ONLY used for the packages mapped to it below.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF"]
+ignore = [
+    "S101",  # assert is fine in tests
+    "B008",  # FastAPI uses function calls (Depends) in defaults
+    "S105", "S106",  # false positives on names like token_type; secrets come from settings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S107", "RUF001"]      # test passwords; typographic characters tested on purpose
+"tests/fixtures/**" = ["E501"]      # long factual sentences in test data
+"tests/fakes.py" = ["E501"]
+"tests/unit/test_generation.py" = ["E501"]
+"tests/integration/test_knowledge_publish.py" = ["E501"]
+"migrations/**" = ["E501", "S608"]  # migrations build DDL from constants only
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["migrations/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: runs the real Docling models (about 1 minute; deselect with -m \"not slow\")",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "python-docx>=1.2.0",
+    "reportlab>=5.1.0",
+    "ruff>=0.17.4",
+]
+ingestion = [
+    "docling>=2.150.0",
+    "torch>=2.15.0",
+    "torchvision>=0.29.2",
+    "trafilatura>=2.3.1",
+]

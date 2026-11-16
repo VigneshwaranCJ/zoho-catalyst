@@ -1,0 +1,251 @@
+{
+  "$defs": {
+    "ActorEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "by": {
+          "pattern": "^(human:[\\w.@-]+|process:[\\w.-]+|[\\w.-]+/[\\w.-]+)$",
+          "title": "By",
+          "type": "string"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "description": "ISO 8601 datetime with offset",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        }
+      },
+      "required": [
+        "by"
+      ],
+      "title": "ActorEvent",
+      "type": "object"
+    },
+    "Locator": {
+      "additionalProperties": true,
+      "description": "Profile extension: where in the source a fact comes from.",
+      "properties": {
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Section"
+        }
+      },
+      "title": "Locator",
+      "type": "object"
+    },
+    "SourceEntry": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,80}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "resource": {
+          "minLength": 1,
+          "title": "Resource",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "last_modified": {
+          "anyOf": [
+            {
+              "description": "ISO 8601 datetime with offset",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Modified"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "locators": {
+          "items": {
+            "$ref": "#/$defs/Locator"
+          },
+          "title": "Locators",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "resource"
+      ],
+      "title": "SourceEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "description": "Frontmatter of a customer-support concept document under our profile.",
+  "properties": {
+    "type": {
+      "minLength": 1,
+      "title": "Type",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 200,
+      "minLength": 3,
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "maxLength": 400,
+      "minLength": 10,
+      "title": "Description",
+      "type": "string"
+    },
+    "resource": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resource"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceEntry"
+      },
+      "minItems": 1,
+      "title": "Sources",
+      "type": "array"
+    },
+    "generated": {
+      "$ref": "#/$defs/ActorEvent"
+    },
+    "verified": {
+      "items": {
+        "$ref": "#/$defs/ActorEvent"
+      },
+      "title": "Verified",
+      "type": "array"
+    },
+    "status": {
+      "default": "stable",
+      "enum": [
+        "draft",
+        "stable",
+        "deprecated"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "stale_after": {
+      "anyOf": [
+        {
+          "description": "ISO 8601 datetime with offset",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stale After"
+    },
+    "audience": {
+      "enum": [
+        "customer",
+        "internal"
+      ],
+      "title": "Audience",
+      "type": "string"
+    },
+    "products": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Products",
+      "type": "array"
+    }
+  },
+  "required": [
+    "type",
+    "title",
+    "description",
+    "sources",
+    "generated",
+    "audience"
+  ],
+  "title": "csp-okf-profile/1 concept frontmatter (OKF v0.2 compatible)",
+  "type": "object",
+  "$id": "https://csp.example/schemas/csp-okf-profile/1.json"
+}
