@@ -19,7 +19,8 @@ RULES:
 - Reply with ONE JSON object and nothing else.
 - To use a tool: {"tool": "<name>", "args": {...}}
 - To answer the user: {"final": "<your answer>"}
-- Use a tool whenever it gives a more accurate answer (math, time, saved notes).
+- Use a tool whenever it gives a more accurate answer (math, time, saved notes, uploaded documents).
+- For general knowledge, chit-chat or creative requests, answer directly from your own knowledge.
 - After a TOOL_RESULT, either call another tool or give the final answer.`;
 }
 

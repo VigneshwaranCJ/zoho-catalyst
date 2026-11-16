@@ -11,9 +11,11 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-// Local development only: load secrets from <project root>/.env (gitignored, not uploaded on deploy).
-// `catalyst serve` does not see variables set in the console; deployed functions do.
+// Secrets live in functions/ai_agent/.env (gitignored). It is uploaded with `catalyst deploy`,
+// because deploy replaces the console's environment variables with those in catalyst-config.json.
+// Values already set in the environment win; the file only fills in missing ones.
 for (const candidate of [
+  path.join(__dirname, '.env'),
   path.join(process.cwd(), '.env'),
   path.join(__dirname, '..', '..', '.env'),
   path.join(__dirname, '..', '..', '..', '.env'),
@@ -52,8 +54,22 @@ function storageFor(req) {
   return createStorage(null);
 }
 
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Catalyst AI Agent API',
+    routes: { 'GET /health': 'status', 'POST /chat': '{ message, sessionId } -> { answer, steps }', 'GET /notes': 'saved notes' },
+    ui: '/app/index.html',
+  });
+});
+
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', provider: process.env.LLM_PROVIDER || 'mock', storage: storageFor(req).kind });
+  const required = ['QUICKML_ENDPOINT_KEY', 'ZOHO_CLIENT_ID', 'ZOHO_CLIENT_SECRET', 'ZOHO_REFRESH_TOKEN'];
+  res.json({
+    status: 'ok',
+    provider: process.env.LLM_PROVIDER || 'mock',
+    storage: storageFor(req).kind,
+    secretsConfigured: required.every((k) => Boolean(process.env[k])),
+  });
 });
 
 app.post('/chat', async (req, res) => {
@@ -67,7 +83,11 @@ app.post('/chat', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Agent error:', err);
-    res.status(500).json({ error: err.message });
+    const busy = /LLM_CALL_FAILED|HTTP 5\d\d|HTTP 429/.test(err.message);
+    res.status(busy ? 503 : 500).json({
+      error: busy ? 'The AI model is busy right now. Please try again in a moment.' : err.message,
+      detail: busy ? err.message : undefined,
+    });
   }
 });
 

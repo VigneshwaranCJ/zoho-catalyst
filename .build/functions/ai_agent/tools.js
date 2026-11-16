@@ -4,7 +4,24 @@
  * The agent loop (agent.js) lists these in the system prompt and executes them.
  */
 
+const { askRag } = require('./llm');
+
 const tools = {
+  ask_documents: {
+    description:
+      "Answer questions from the organisation's uploaded documents (QuickML Knowledge Base via RAG). " +
+      'Use for anything about company policies, product docs, manuals or other uploaded files. ' +
+      'Returns an answer and citations; mention the document names you used.',
+    params: { question: 'string, a self-contained question' },
+    async run({ question }) {
+      if (!question) return { error: 'question is required' };
+      if (!process.env.RAG_ENDPOINT_URL) {
+        return { error: 'Document search is not configured (RAG_ENDPOINT_URL is not set).' };
+      }
+      return askRag(String(question).slice(0, 2000));
+    },
+  },
+
   calculator: {
     description: 'Evaluate an arithmetic expression. Supports + - * / % ^ and parentheses.',
     params: { expression: 'string, e.g. "(12.5 * 4) / 3"' },

@@ -9,6 +9,8 @@
       "QUICKML_ORG_ID": "60095514957",
       "QUICKML_ENVIRONMENT": "Development",
       "QUICKML_PROMPT_FIELD": "prompt",
+      "RAG_ENDPOINT_URL": "https://console.catalyst.zoho.in/quickml/v1/project/88369000000013024/genai/endpoints/rag/generate",
+      "RAG_PROMPT_FIELD": "query",
       "ZOHO_ACCOUNTS_URL": "https://accounts.zoho.in"
     }
   },
